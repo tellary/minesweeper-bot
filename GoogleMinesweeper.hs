@@ -5,9 +5,9 @@ module GoogleMinesweeper where
 import Codec.Picture
 import Codec.Picture.Extra        (crop)
 import Control.Concurrent         (threadDelay)
-import Control.Monad.Catch        (SomeException, catch)
 import Control.Monad.IO.Class     (liftIO)
-import Data.ByteString.Lazy
+import Data.ByteString.Lazy       (ByteString, toStrict)
+import Data.List
 import Model
 import Test.WebDriver
 import Test.WebDriver.Common.Keys (enter)
@@ -18,10 +18,11 @@ import Test.WebDriver.Session
 remoteConfig = useBrowser chrome defaultConfig { wdHost = "localhost"
                                                , wdPort = 9515
                                                }
+
 returnSession config wd = runSession config $ do
   sess <- getSession
-  catch (wd >>= \a -> return (sess, Right a))
-    $ \(e::SomeException) -> return (sess, Left e)
+  a <- wd
+  return (sess, a)
 
 openGame :: WD DynamicImage
 openGame = do
@@ -56,10 +57,24 @@ takeFieldScreenshot = do
       )
       img
 
+readFieldDimensions :: Pixel a => Image a -> (Int, Int)
+readFieldDimensions img
+  = (imageWidth img `div` firstCellSize, imageHeight img `div` firstCellSize)
+  where
+    firstCellSize
+      = 1 + (length . head . group . map (\i -> pixelAt img i 0) $ [0..])
+
 readField :: DynamicImage -> Field
 readField = undefined
 
-openCell :: IO ()
-openCell = undefined
+openField = dynamicMap readFieldDimensions <$> openGame
 
--- writeDynamicBitmap "field.png" =<< runSession remoteConfig openGame
+digCell :: IO ()
+digCell = undefined
+
+-- r <- returnSession remoteConfig openGame
+-- img <- runWD (fst r) takeFieldScreenshot
+-- img2 = convertRGB8 img
+-- pPrintNoColor . take 10 . map (\g -> (length g, head g)) . group . map (\i -> pixelAt img2 i 0) $ [0..]
+-- dynamicMap readFieldDimensions img
+-- r <- returnSession remoteConfig openField
