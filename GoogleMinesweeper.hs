@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module GoogleMinesweeper where
 
@@ -57,24 +58,93 @@ takeFieldScreenshot = do
       )
       img
 
-readFieldDimensions :: Pixel a => Image a -> (Int, Int)
-readFieldDimensions img
-  = (imageWidth img `div` firstCellSize, imageHeight img `div` firstCellSize)
+readFieldSize :: Pixel a => Image a -> FieldSize
+readFieldSize img
+  = FieldSize
+    (imageWidth  img `div` firstCellSize)
+    (imageHeight img `div` firstCellSize)
+    firstCellSize
   where
     firstCellSize
       = 1 + (length . head . group . map (\i -> pixelAt img i 0) $ [0..])
 
-readField :: DynamicImage -> Field
-readField = undefined
+centerOfCellAt :: FieldSize -> Int -> Int -> (Int, Int)
+centerOfCellAt FieldSize {..} x y
+  = ( x * cellSize + cellSize `div` 2, y * cellSize + cellSize `div` 2 )
 
-openField = dynamicMap readFieldDimensions <$> openGame
+centerOfCellPixelAt :: Image PixelRGB8 -> FieldSize -> Int -> Int -> PixelRGB8
+centerOfCellPixelAt img fs x y = uncurry (pixelAt img) (centerOfCellAt fs x y)
+
+upperLeftThirdOfCellAt :: FieldSize -> Int -> Int -> (Int, Int)
+upperLeftThirdOfCellAt FieldSize {..} x y
+  = ( x * cellSize + cellSize `div` 3, y * cellSize + cellSize `div` 3)
+
+upperLeftThirdOfCellPixelAt img fs x y
+  = uncurry (pixelAt img) (upperLeftThirdOfCellAt fs x y)
+
+fieldGreenLight = PixelRGB8 180 212 102
+fieldGreenDark = PixelRGB8 172 206 95
+flagLight = PixelRGB8 181 206 98
+flagDark = PixelRGB8 174 200 92
+openLight = PixelRGB8 224 195 164
+openDark = PixelRGB8 211 185 157
+openBlue1 = PixelRGB8 52 119 203
+openGreenDark2 = PixelRGB8 103 148 87
+openGreenLight2 = PixelRGB8 106 150 88
+openRed3 = PixelRGB8 195 63 56
+openPurpleLight4 = PixelRGB8 217 184 163
+openPurpleDark4 = PixelRGB8 204 175 157
+openOrange5 = PixelRGB8 234 168 89 -- Light
+
+readCellAt :: Image PixelRGB8 -> FieldSize -> Int -> Int -> Cell
+readCellAt img fs x y
+  | centerPixel == fieldGreenLight
+  = Field
+  | centerPixel == fieldGreenDark
+  = Field
+  | centerPixel == flagLight
+  = Flag
+  | centerPixel == flagDark
+  = Flag
+  | centerPixel == openLight
+  = Open
+  | centerPixel == openDark
+  = Open
+  | centerPixel == openBlue1
+  = Number 1
+  | centerPixel == openGreenLight2
+  = Number 2
+  | centerPixel == openGreenDark2
+  = Number 2
+  | centerPixel == openRed3
+  = Number 3
+  | centerPixel == openPurpleLight4
+  = Number 4
+  | centerPixel == openPurpleDark4
+  = Number 4
+  | centerPixel == openOrange5
+  = Number 5
+  | otherwise = error $ "Can't read cell: " ++ show centerPixel
+  where
+    centerPixel = centerOfCellPixelAt img fs x y
+
+readField :: Image PixelRGB8 -> FieldSize -> Field
+readField img fs@FieldSize {..}
+  = [
+      [readCellAt img fs x y | x <- [0 .. fieldWidth - 1]]
+      | y <- [0..fieldHeight - 1]
+    ]
+
+openField = dynamicMap readFieldSize <$> openGame
 
 digCell :: IO ()
 digCell = undefined
 
 -- r <- returnSession remoteConfig openGame
+-- r <- returnSession remoteConfig openField
 -- img <- runWD (fst r) takeFieldScreenshot
 -- img2 = convertRGB8 img
+-- img <- convertRGB8 <$> runWD (fst r) takeFieldScreenshot
 -- pPrintNoColor . take 10 . map (\g -> (length g, head g)) . group . map (\i -> pixelAt img2 i 0) $ [0..]
--- dynamicMap readFieldDimensions img
--- r <- returnSession remoteConfig openField
+-- dynamicMap readFieldSize img
+
