@@ -108,44 +108,57 @@ openPurpleLight4 = PixelRGB8 217 184 163
 openPurpleDark4 = PixelRGB8 204 175 157
 openOrange5 = PixelRGB8 234 168 89 -- Light
 
-readCellAt :: Image PixelRGB8 -> FieldSize -> Int -> Int -> Cell
+data ReadCellError
+  = ReadCellError
+  { x :: Int
+  , y :: Int
+  , pixel :: PixelRGB8
+  } deriving Show
+
+readCellAt :: Image PixelRGB8 -> FieldSize -> Int -> Int -> Either ReadCellError Cell
 readCellAt img fs x y
   | centerPixel == fieldGreenLight
-  = Field
+  = Right Field
   | centerPixel == fieldGreenDark
-  = Field
+  = Right Field
   | centerPixel == flagLight
-  = Flag
+  = Right Flag
   | centerPixel == flagDark
-  = Flag
+  = Right Flag
   | centerPixel == openLight
-  = Open
+  = Right Open
   | centerPixel == openDark
-  = Open
+  = Right Open
   | centerPixel == openBlue1
-  = Number 1
+  = Right $ Number 1
   | centerPixel == openGreenLight2
-  = Number 2
+  = Right $ Number 2
   | centerPixel == openGreenDark2
-  = Number 2
+  = Right $ Number 2
   | centerPixel == openRed3
-  = Number 3
+  = Right $ Number 3
   | centerPixel == openPurpleLight4
-  = Number 4
+  = Right $ Number 4
   | centerPixel == openPurpleDark4
-  = Number 4
+  = Right $ Number 4
   | centerPixel == openOrange5
-  = Number 5
-  | otherwise = error $ "Can't read cell: " ++ show centerPixel
+  = Right $ Number 5
+  | otherwise = Left $ ReadCellError x y centerPixel
   where
     centerPixel = centerOfCellPixelAt img fs x y
 
 readField :: Image PixelRGB8 -> FieldSize -> Field
 readField img fs@FieldSize {..}
-  = [
+  = map (\l -> map (either (error . show) id) l) [
       [readCellAt img fs x y | x <- [0 .. fieldWidth - 1]]
       | y <- [0..fieldHeight - 1]
     ]
+
+readFieldFromScreen :: WD Field
+readFieldFromScreen = do
+  img <- convertRGB8 <$> takeFieldScreenshot
+  let fs = readFieldSize img
+  return $ readField img fs
 
 openField size = do
   screen <- openGame size
@@ -157,5 +170,4 @@ digCell :: IO ()
 digCell = undefined
 
 -- r <- returnSession remoteConfig (openField Easy)
-
-
+-- runWD (fst r) readFieldFromScreen
