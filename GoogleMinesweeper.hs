@@ -25,19 +25,31 @@ returnSession config wd = runSession config $ do
   a <- wd
   return (sess, a)
 
-openGame :: WD DynamicImage
-openGame = do
+data GameSize = Easy | Medium | Hard
+
+openGame :: GameSize -> WD DynamicImage
+openGame size = do
   openPage "https://www.google.com"
   searchTextarea <- findElem (ByTag "textarea")
   sendKeys "minesweeper" searchTextarea
   sendKeys enter searchTextarea
   playButton <- findElem (ByXPath "//div[text() = 'Play']")
   keysSent <- sendKeys enter playButton
+
+  selectSize size
+
   canvas <- findElem (ByTag "canvas")
   click canvas
   -- wait 3 seconds to allow visual effects to pass
   liftIO (threadDelay (3*1000*1000))
   takeFieldScreenshot
+
+selectSize Medium = return ()
+selectSize size = do
+  click =<< findElem (ByTag "g-dropdown-menu")
+  case size of
+    Easy -> click =<< findElem (ByXPath "//div[text() = 'Easy']")
+    Hard -> click =<< findElem (ByXPath "//div[text() = 'Hard']")
 
 takeFieldScreenshot :: WD DynamicImage
 takeFieldScreenshot = do
@@ -135,16 +147,15 @@ readField img fs@FieldSize {..}
       | y <- [0..fieldHeight - 1]
     ]
 
-openField = dynamicMap readFieldSize <$> openGame
+openField size = do
+  screen <- openGame size
+  let img = convertRGB8 screen
+  let fs = readFieldSize img
+  return $ readField img fs
 
 digCell :: IO ()
 digCell = undefined
 
--- r <- returnSession remoteConfig openGame
--- r <- returnSession remoteConfig openField
--- img <- runWD (fst r) takeFieldScreenshot
--- img2 = convertRGB8 img
--- img <- convertRGB8 <$> runWD (fst r) takeFieldScreenshot
--- pPrintNoColor . take 10 . map (\g -> (length g, head g)) . group . map (\i -> pixelAt img2 i 0) $ [0..]
--- dynamicMap readFieldSize img
+-- r <- returnSession remoteConfig (openField Easy)
+
 
