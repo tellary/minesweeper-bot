@@ -3,16 +3,16 @@
 
 module GoogleMinesweeper where
 
-import Data.Maybe
-import Control.Monad.Extra
-import Control.Monad.Writer
-import Data.Ord (comparing)
 import Codec.Picture
 import Codec.Picture.Extra        (crop)
 import Control.Concurrent         (threadDelay)
+import Control.Monad.Extra        (ifM)
 import Control.Monad.IO.Class     (liftIO)
+import Control.Monad.Writer       (Writer, runWriter, tell, writer)
 import Data.ByteString.Lazy       (ByteString, toStrict)
-import Data.List
+import Data.List                  (group, minimumBy)
+import Data.Ord                   (comparing)
+import Data.Ratio                 (Ratio, denominator, numerator, (%))
 import Model
 import Test.WebDriver
 import Test.WebDriver.Common.Keys (enter)
@@ -84,26 +84,21 @@ readFieldSize img
     firstCellSize
       = 1 + (length . head . group . map (\i -> pixelAt img i 0) $ [0..])
 
-centerOfCellAt :: FieldSize -> Int -> Int -> (Int, Int)
-centerOfCellAt FieldSize {..} x y
-  = ( x * cellSize + cellSize `div` 2, y * cellSize + cellSize `div` 2 )
+inCellAt :: FieldSize -> Rational -> Rational -> Int -> Int -> (Int, Int)
+inCellAt FieldSize {..} ratioX ratioY x y
+  = ( x * cellSize
+      + (cellSize * fromIntegral (numerator ratioX))
+        `div` fromIntegral (denominator ratioX)
+    , y * cellSize
+      + (cellSize * fromIntegral (numerator ratioY))
+        `div` fromIntegral (denominator ratioY)
+    )
 
-centerOfCellPixelAt :: Image PixelRGB8 -> FieldSize -> Int -> Int -> PixelRGB8
-centerOfCellPixelAt img fs x y = uncurry (pixelAt img) (centerOfCellAt fs x y)
-
-topLeftCornerOfCellAt :: FieldSize -> Int -> Int -> (Int, Int)
-topLeftCornerOfCellAt FieldSize {..} x y
-  = ( x * cellSize + cellSize `div` 10, y * cellSize + cellSize `div` 10)
-
-topLeftCornerOfCellPixelAt img fs x y
-  = uncurry (pixelAt img) (topLeftCornerOfCellAt fs x y)
-
-topLeftQuarterOfCellAt :: FieldSize -> Int -> Int -> (Int, Int)
-topLeftQuarterOfCellAt FieldSize {..} x y
-  = ( x * cellSize + cellSize `div` 4, y * cellSize + cellSize `div` 4)
-
-topLeftQuarterOfCellPixelAt img fs x y
-  = uncurry (pixelAt img) (topLeftQuarterOfCellAt fs x y)
+inCellPixelAt
+  :: Image PixelRGB8 -> FieldSize -> Rational -> Rational -> Int -> Int
+  -> PixelRGB8
+inCellPixelAt img fs ratioX ratioY x y
+  = uncurry (pixelAt img) (inCellAt fs ratioX ratioY x y)
 
 pixelDistance :: Floating a => PixelRGB8 -> PixelRGB8 -> a
 pixelDistance (PixelRGB8 r1 g1 b1) (PixelRGB8 r2 g2 b2)
@@ -122,7 +117,7 @@ openDark = PixelRGB8 211 185 157
 openBlue1 = PixelRGB8 52 119 203
 openGreen2 = PixelRGB8 106 151 88
 openRed3 = PixelRGB8 195 63 56
-openPurple4 = PixelRGB8 187 151 156
+openPurple4 = PixelRGB8 113 45 156
 openOrange5 = PixelRGB8 234 168 89
 openBlue6 = PixelRGB8 113 167 163
 
@@ -131,13 +126,12 @@ fieldPixels =
   , (fieldGreenDark, Field)
   ]
 
-openCellPixels =
+openCellMiddlePixels =
   [ (openLight, Open)
   , (openDark, Open)
   , (openBlue1, Number 1)
   , (openGreen2, Number 2)
   , (openRed3, Number 3)
-  , (openPurple4, Number 4)
   , (openOrange5, Number 5)
   , (openBlue6, Number 6)
   ]
@@ -160,7 +154,10 @@ data ReadCellMsgType
   | IsNotFieldOrFlagMsg
   | IsFlagMsg
   | IsNotFlagMsg
-  | ReadOpenCellFailed
+  | ReadOpenCellFailedMsg
+  | ReadOpenCellSuccessMsg
+  | IsNumber4Msg
+  | IsNotNumber4Msg
   deriving Show
 
 isFieldOrFlag img fs x y
@@ -169,27 +166,36 @@ isFieldOrFlag img fs x y
   | otherwise
   = writer (False, [ReadCellMsg IsNotFieldOrFlagMsg x y topLeftCornerPixel])
   where
-    topLeftCornerPixel = topLeftCornerOfCellPixelAt img fs x y
+    topLeftCornerPixel = inCellPixelAt img fs (1%10) (1%10) x y
     (error, _) = closestCellByPixel topLeftCornerPixel fieldPixels
 
 isFlag img fs x y
   | error < 25 = writer (True, [ReadCellMsg IsFlagMsg x y pixel])
   | otherwise = writer (False, [ReadCellMsg IsNotFlagMsg x y pixel])
   where
-    pixel = topLeftQuarterOfCellPixelAt img fs x y
+    pixel = inCellPixelAt img fs (1%4) (1%4) x y
     error = pixelDistance pixel flag
 
-readOpenCellAt
+isNumber4 img fs x y
+  | error < 5 = writer (True, [ReadCellMsg IsNumber4Msg x y pixel])
+  | otherwise = writer (False, [ReadCellMsg IsNotNumber4Msg x y pixel])
+  where
+    pixel = inCellPixelAt img fs (35%60) (35%60) x y
+    error = pixelDistance pixel openPurple4
+
+readOpenCellMiddleAt
   :: Image PixelRGB8 -> FieldSize -> Int -> Int
   -> Writer [ReadCellMsg] (Maybe Cell)
-readOpenCellAt img fs x y
-  | error < 25 = return . Just $ closestCell
+readOpenCellMiddleAt img fs x y
+  | error < 25 = do
+      tell [ReadCellMsg ReadOpenCellSuccessMsg x y centerPixel]
+      return . Just $ closestCell
   | otherwise = do
-      tell [ReadCellMsg ReadOpenCellFailed x y centerPixel]
+      tell [ReadCellMsg ReadOpenCellFailedMsg x y centerPixel]
       return Nothing
   where
-    centerPixel = centerOfCellPixelAt img fs x y
-    (error, closestCell) = closestCellByPixel centerPixel openCellPixels
+    centerPixel = inCellPixelAt img fs (1%2) (1%2) x y
+    (error, closestCell) = closestCellByPixel centerPixel openCellMiddlePixels
 
 
 readCellAt
@@ -201,7 +207,10 @@ readCellAt img fs x y = do
       ( return . Just $ Flag )
       ( return . Just $ Field )
     )
-    ( readOpenCellAt img fs x y)
+    ( ifM (isNumber4 img fs x y)
+      ( return . Just $ Number 4 )
+      ( readOpenCellMiddleAt img fs x y)
+    )
 
 readFieldWithMsgs
   :: Image PixelRGB8 -> FieldSize
@@ -213,8 +222,11 @@ readFieldWithMsgs img fs@FieldSize {..}
     | y <- [0..fieldHeight - 1]
     ]
 
-fromCellsWithMsgs
-  = map (map (\(f, msgs) -> if isJust f then fromJust f else error $ show msgs))
+fromCellsWithMsgs fieldWithMsgs = do
+  rowOfCells <- fieldWithMsgs
+  return $ do
+    (cell, msgs) <- rowOfCells
+    return $ maybe (error $ show msgs) id cell
 
 readField :: Image PixelRGB8 -> FieldSize -> Field
 readField img fs
@@ -243,6 +255,7 @@ digCell :: IO ()
 digCell = undefined
 
 -- r <- returnSession remoteConfig (openFieldWithMsgs Easy)
+-- r <- returnSession remoteConfig (openField Medium)
 -- pPrintNoColor (snd r)
 -- pPrintNoColor . fromCellsWithMsgs $ snd r
 -- pPrintNoColor =<< runWD (fst r) readFieldFromScreen
