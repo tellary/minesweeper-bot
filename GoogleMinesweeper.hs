@@ -13,7 +13,7 @@ import Data.ByteString.Lazy       (ByteString, toStrict)
 import Data.List                  (group, minimumBy)
 import Data.Ord                   (comparing)
 import Data.Ratio                 (Ratio, denominator, numerator, (%))
-import Model
+import Model                      hiding (isFlag)
 import Test.WebDriver
 import Test.WebDriver.Common.Keys (enter)
 import Test.WebDriver.Session
@@ -74,11 +74,13 @@ takeFieldScreenshot = do
       )
       img
 
-readFieldSize :: Pixel a => Image a -> FieldSize
-readFieldSize img
-  = FieldSize
-    (imageWidth  img `div` firstCellSize)
-    (imageHeight img `div` firstCellSize)
+readImgFieldSize :: Pixel a => Image a -> ImgFieldSize
+readImgFieldSize img
+  = ImgFieldSize
+    (FieldSize
+      (imageWidth  img `div` firstCellSize)
+      (imageHeight img `div` firstCellSize)
+    )
     firstCellSize
   where
     firstCellSize
@@ -87,8 +89,8 @@ readFieldSize img
 data InCellPosition
   = InCellPosition { ratioX :: Rational, ratioY :: Rational } deriving Show
 
-inCellAt :: FieldSize -> InCellPosition -> Position -> (Int, Int)
-inCellAt FieldSize {..} inCellPos pos
+inCellAt :: ImgFieldSize -> InCellPosition -> Position -> (Int, Int)
+inCellAt ImgFieldSize {imgCellSize = cellSize} inCellPos pos
   = ( (x pos) * cellSize
       + (cellSize * fromIntegral (numerator (ratioX inCellPos)))
         `div` fromIntegral (denominator (ratioX inCellPos))
@@ -98,7 +100,7 @@ inCellAt FieldSize {..} inCellPos pos
     )
 
 inCellPixelAt
-  :: Image PixelRGB8 -> FieldSize -> InCellPosition -> Position
+  :: Image PixelRGB8 -> ImgFieldSize -> InCellPosition -> Position
   -> PixelRGB8
 inCellPixelAt img fs inCellPos pos
   = uncurry (pixelAt img) (inCellAt fs inCellPos pos)
@@ -163,7 +165,7 @@ data ReadCellMsgType
   deriving Show
 
 isFieldOrFlag
-  :: Image PixelRGB8 -> FieldSize -> Position
+  :: Image PixelRGB8 -> ImgFieldSize -> Position
   -> Writer [ReadCellMsg] Bool
 isFieldOrFlag img fs pos
   | error < 25
@@ -190,7 +192,7 @@ isNumber4 img fs pos
     error = pixelDistance pixel openPurple4
 
 readOpenCellMiddleAt
-  :: Image PixelRGB8 -> FieldSize -> Position
+  :: Image PixelRGB8 -> ImgFieldSize -> Position
   -> Writer [ReadCellMsg] (Maybe Cell)
 readOpenCellMiddleAt img fs pos
   | error < 25 = do
@@ -205,7 +207,7 @@ readOpenCellMiddleAt img fs pos
 
 
 readCellAt
-  :: Image PixelRGB8 -> FieldSize -> Position
+  :: Image PixelRGB8 -> ImgFieldSize -> Position
   -> Writer [ReadCellMsg] (Maybe Cell)
 readCellAt img fs pos = do
   ifM (isFieldOrFlag img fs pos)
@@ -219,9 +221,9 @@ readCellAt img fs pos = do
     )
 
 readFieldWithMsgs
-  :: Image PixelRGB8 -> FieldSize
+  :: Image PixelRGB8 -> ImgFieldSize
   -> [[(Maybe Cell, [ReadCellMsg])]]
-readFieldWithMsgs img fs@FieldSize {..}
+readFieldWithMsgs img fs@ImgFieldSize {imgFieldSize = FieldSize{..}}
   = [
       [runWriter $ readCellAt img fs (Position x y)
       | x <- [0 .. fieldWidth - 1]]
@@ -234,13 +236,13 @@ fromCellsWithMsgs fieldWithMsgs = do
     (cell, msgs) <- rowOfCells
     return $ maybe (error $ show msgs) id cell
 
-readField :: Image PixelRGB8 -> FieldSize -> CellField
+readField :: Image PixelRGB8 -> ImgFieldSize -> CellField
 readField img fs
   =  mkField . fromCellsWithMsgs $ readFieldWithMsgs img fs
 
 readFieldFromScreen0 readFieldF = do
   img <- convertRGB8 <$> takeFieldScreenshot
-  let fs = readFieldSize img
+  let fs = readImgFieldSize img
   return $ readFieldF img fs
 
 readFieldFromScreen :: WD CellField
@@ -251,7 +253,7 @@ readFieldFromScreenWithMsg = readFieldFromScreen0 readFieldWithMsgs
 openField0 readFieldF size = do
   screen <- openGame size
   let img = convertRGB8 screen
-  let fs = readFieldSize img
+  let fs = readImgFieldSize img
   return $ readFieldF img fs
 
 openField = openField0 readField
