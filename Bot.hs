@@ -18,17 +18,23 @@ neighbors field pos =
 -- neighbors f (Position 2 2) == [5,8,6]
 -- neighbors f (Position 1 1) [1,4,7,2,8,3,6,9]
 
-markIfMatchNumber :: CellField -> Position -> [Cell]
-markIfMatchNumber field pos
+markPosIfMatchNumber :: CellField -> Position -> [Position]
+markPosIfMatchNumber field pos
   = case cell of
       Cell (Number n) _
         | length flagCells + length fieldCells == n
-          -> fieldCells
+          -> map Model.pos fieldCells
       _ -> []
   where
     cell = cellAt field pos
     flagCells  = filter isFlag  (neighbors field pos)
     fieldCells = filter isField (neighbors field pos)
+
+markIfMatchNumber :: CellField -> Field (Position, [Position])
+markIfMatchNumber field
+  = flip fmap field
+    $ \cell
+      -> (pos cell, markPosIfMatchNumber field $ pos cell)
 
 -- :l Bot GoogleMinesweeper
 -- import GoogleMinesweeper

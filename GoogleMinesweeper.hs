@@ -3,20 +3,27 @@
 
 module GoogleMinesweeper where
 
-import Codec.Picture
-import Codec.Picture.Extra        (crop)
-import Control.Concurrent         (threadDelay)
-import Control.Monad.Extra        (ifM)
-import Control.Monad.IO.Class     (liftIO)
-import Control.Monad.Writer       (Writer, runWriter, tell, writer)
-import Data.ByteString.Lazy       (ByteString, toStrict)
-import Data.List                  (group, minimumBy)
-import Data.Ord                   (comparing)
-import Data.Ratio                 (Ratio, denominator, numerator, (%))
-import Model                      hiding (isFlag)
-import Test.WebDriver
-import Test.WebDriver.Common.Keys (enter)
-import Test.WebDriver.Session
+import           Bot
+import           Codec.Picture
+import           Codec.Picture.Extra        (crop)
+import           Control.Concurrent         (threadDelay)
+import           Control.Monad              (forM_)
+import           Control.Monad.Extra        (ifM)
+import           Control.Monad.IO.Class     (liftIO)
+import           Control.Monad.Writer       (Writer, runWriter, tell, writer)
+import           Data.ByteString.Lazy       (ByteString, toStrict)
+import           Data.Foldable              (fold)
+import           Data.List                  (group, minimumBy, nub)
+import           Data.Ord                   (comparing)
+import           Data.Ratio                 (Ratio, denominator, numerator, (%))
+import           Model                      (Cell (..), CellField,
+                                             CellType (..), FieldSize (..),
+                                             ImgFieldSize (..), Position (..),
+                                             mkField)
+import qualified Model
+import           Test.WebDriver
+import           Test.WebDriver.Common.Keys (enter)
+import           Test.WebDriver.Session
 
 -- ./chromedriver --port=9515 --log-level=ALL --url-base=/wd/hub
 -- ./chromedriver --port=9515 --url-base=/wd/hub
@@ -236,31 +243,39 @@ fromCellsWithMsgs fieldWithMsgs = do
     (cell, msgs) <- rowOfCells
     return $ maybe (error $ show msgs) id cell
 
+data GameField
+  = GameField
+  { gameImage :: Image PixelRGB8
+  , gameFieldSize :: ImgFieldSize
+  , gameField :: CellField
+  }
+
 readField :: Image PixelRGB8 -> ImgFieldSize -> CellField
 readField img fs
   =  mkField . fromCellsWithMsgs $ readFieldWithMsgs img fs
 
-readFieldFromScreen0 readFieldF = do
+readFieldFromScreen :: WD GameField
+readFieldFromScreen = do
   img <- convertRGB8 <$> takeFieldScreenshot
   let fs = readImgFieldSize img
-  return $ readFieldF img fs
+  return $ GameField img fs (readField img fs)
 
-readFieldFromScreen :: WD CellField
-readFieldFromScreen = readFieldFromScreen0 readField
+readFieldFromScreenWithMsg = do
+  img <- convertRGB8 <$> takeFieldScreenshot
+  let fs = readImgFieldSize img
+  return $ readFieldWithMsgs img fs
 
-readFieldFromScreenWithMsg = readFieldFromScreen0 readFieldWithMsgs
-
-openField0 readFieldF size = do
+openField size = do
   screen <- openGame size
   let img = convertRGB8 screen
   let fs = readImgFieldSize img
-  return $ readFieldF img fs
+  return $ GameField img fs (readField img fs)
 
-openField = openField0 readField
-openFieldWithMsgs = openField0 readFieldWithMsgs
-
-digCell :: IO ()
-digCell = undefined
+openFieldWithMsgs size = do
+  screen <- openGame size
+  let img = convertRGB8 screen
+  let fs = readImgFieldSize img
+  return $ readFieldWithMsgs img fs
 
 -- r <- returnSession remoteConfig (openFieldWithMsgs Easy)
 -- r <- returnSession remoteConfig (openField Medium)
@@ -269,3 +284,38 @@ digCell = undefined
 -- pPrintNoColor =<< runWD (fst r) readFieldFromScreen
 -- r <- returnSession remoteConfig (openFieldWithMsgs Hard)
 -- img <- runWD (fst r) (convertRGB8 <$> takeFieldScreenshot)
+
+rightClickCanvas :: WD ()
+rightClickCanvas = do
+  canvas <- findElem (ByTag "canvas")
+  moveToFrom (10, 10) canvas
+  clickWith RightButton
+-- runWD (fst r) rightClickCanvas
+markCell :: Element -> ImgFieldSize -> Position -> WD ()
+markCell canvas fs pos = do
+  (x, y) <- elemPos canvas
+  let centerCell = inCellAt fs (InCellPosition (1%2) (1%2)) pos
+  let screenPos
+        = ( fst centerCell `div` 2
+          , snd centerCell `div` 2
+          )
+  liftIO . putStrLn $ "markCell: " ++ show screenPos
+  moveToFrom screenPos canvas
+  clickWith RightButton
+
+markCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
+markCells fs cellPositions = do
+  canvas <- findElem (ByTag "canvas")
+  forM_ cellPositions (markCell canvas fs)
+
+performMarkIfMatchNumber :: GameField -> WD ()
+performMarkIfMatchNumber field
+  = markCells
+    (gameFieldSize field)
+    (nub . fold $ snd <$> markIfMatchNumber (gameField field))
+-- r <- returnSession remoteConfig (openField Medium)
+-- runWD (fst r) $ performMarkIfMatchNumber (snd r)
+-- runWD (fst r) (performMarkIfMatchNumber =<< readFieldFromScreen)
+
+digCell :: IO ()
+digCell = undefined
