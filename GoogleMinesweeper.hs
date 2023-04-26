@@ -84,21 +84,24 @@ readFieldSize img
     firstCellSize
       = 1 + (length . head . group . map (\i -> pixelAt img i 0) $ [0..])
 
-inCellAt :: FieldSize -> Rational -> Rational -> Int -> Int -> (Int, Int)
-inCellAt FieldSize {..} ratioX ratioY x y
-  = ( x * cellSize
-      + (cellSize * fromIntegral (numerator ratioX))
-        `div` fromIntegral (denominator ratioX)
-    , y * cellSize
-      + (cellSize * fromIntegral (numerator ratioY))
-        `div` fromIntegral (denominator ratioY)
+data InCellPosition
+  = InCellPosition { ratioX :: Rational, ratioY :: Rational } deriving Show
+
+inCellAt :: FieldSize -> InCellPosition -> Position -> (Int, Int)
+inCellAt FieldSize {..} inCellPos pos
+  = ( (x pos) * cellSize
+      + (cellSize * fromIntegral (numerator (ratioX inCellPos)))
+        `div` fromIntegral (denominator (ratioX inCellPos))
+    , (y pos) * cellSize
+      + (cellSize * fromIntegral (numerator (ratioY inCellPos)))
+        `div` fromIntegral (denominator (ratioY inCellPos))
     )
 
 inCellPixelAt
-  :: Image PixelRGB8 -> FieldSize -> Rational -> Rational -> Int -> Int
+  :: Image PixelRGB8 -> FieldSize -> InCellPosition -> Position
   -> PixelRGB8
-inCellPixelAt img fs ratioX ratioY x y
-  = uncurry (pixelAt img) (inCellAt fs ratioX ratioY x y)
+inCellPixelAt img fs inCellPos pos
+  = uncurry (pixelAt img) (inCellAt fs inCellPos pos)
 
 pixelDistance :: Floating a => PixelRGB8 -> PixelRGB8 -> a
 pixelDistance (PixelRGB8 r1 g1 b1) (PixelRGB8 r2 g2 b2)
@@ -126,7 +129,7 @@ fieldPixels =
   , (fieldGreenDark, Field)
   ]
 
-openCellMiddlePixels =
+openCellTypeMiddlePixels =
   [ (openLight, Open)
   , (openDark, Open)
   , (openBlue1, Number 1)
@@ -136,7 +139,7 @@ openCellMiddlePixels =
   , (openBlue6, Number 6)
   ]
 
-closestCellByPixel pixel pixels
+closestCellTypeByPixel pixel pixels
   = minimumBy (comparing fst)
   . map (\(pixel1, cell) -> (pixelDistance pixel pixel1, cell))
   $ pixels
@@ -144,8 +147,7 @@ closestCellByPixel pixel pixels
 data ReadCellMsg
   = ReadCellMsg
   { msgType :: ReadCellMsgType
-  , x :: Int
-  , y :: Int
+  , pos :: Position
   , pixel :: PixelRGB8
   } deriving Show
 
@@ -160,56 +162,60 @@ data ReadCellMsgType
   | IsNotNumber4Msg
   deriving Show
 
-isFieldOrFlag img fs x y
+isFieldOrFlag
+  :: Image PixelRGB8 -> FieldSize -> Position
+  -> Writer [ReadCellMsg] Bool
+isFieldOrFlag img fs pos
   | error < 25
-  = writer (True, [ReadCellMsg IsFieldOrFlagMsg x y topLeftCornerPixel])
+  = writer (True, [ReadCellMsg IsFieldOrFlagMsg pos topLeftCornerPixel])
   | otherwise
-  = writer (False, [ReadCellMsg IsNotFieldOrFlagMsg x y topLeftCornerPixel])
+  = writer (False, [ReadCellMsg IsNotFieldOrFlagMsg pos topLeftCornerPixel])
   where
-    topLeftCornerPixel = inCellPixelAt img fs (1%10) (1%10) x y
-    (error, _) = closestCellByPixel topLeftCornerPixel fieldPixels
+    topLeftCornerPixel
+      = inCellPixelAt img fs (InCellPosition (1%10) (1%10)) pos
+    (error, _) = closestCellTypeByPixel topLeftCornerPixel fieldPixels
 
-isFlag img fs x y
-  | error < 25 = writer (True, [ReadCellMsg IsFlagMsg x y pixel])
-  | otherwise = writer (False, [ReadCellMsg IsNotFlagMsg x y pixel])
+isFlag img fs pos
+  | error < 25 = writer (True, [ReadCellMsg IsFlagMsg pos pixel])
+  | otherwise = writer (False, [ReadCellMsg IsNotFlagMsg pos pixel])
   where
-    pixel = inCellPixelAt img fs (1%4) (1%4) x y
+    pixel = inCellPixelAt img fs (InCellPosition (1%4) (1%4)) pos
     error = pixelDistance pixel flag
 
-isNumber4 img fs x y
-  | error < 5 = writer (True, [ReadCellMsg IsNumber4Msg x y pixel])
-  | otherwise = writer (False, [ReadCellMsg IsNotNumber4Msg x y pixel])
+isNumber4 img fs pos
+  | error < 5 = writer (True, [ReadCellMsg IsNumber4Msg pos pixel])
+  | otherwise = writer (False, [ReadCellMsg IsNotNumber4Msg pos pixel])
   where
-    pixel = inCellPixelAt img fs (35%60) (35%60) x y
+    pixel = inCellPixelAt img fs (InCellPosition (35%60) (35%60)) pos
     error = pixelDistance pixel openPurple4
 
 readOpenCellMiddleAt
-  :: Image PixelRGB8 -> FieldSize -> Int -> Int
+  :: Image PixelRGB8 -> FieldSize -> Position
   -> Writer [ReadCellMsg] (Maybe Cell)
-readOpenCellMiddleAt img fs x y
+readOpenCellMiddleAt img fs pos
   | error < 25 = do
-      tell [ReadCellMsg ReadOpenCellSuccessMsg x y centerPixel]
-      return . Just $ closestCell
+      tell [ReadCellMsg ReadOpenCellSuccessMsg pos centerPixel]
+      return . Just $ Cell closestCellType pos
   | otherwise = do
-      tell [ReadCellMsg ReadOpenCellFailedMsg x y centerPixel]
+      tell [ReadCellMsg ReadOpenCellFailedMsg pos centerPixel]
       return Nothing
   where
-    centerPixel = inCellPixelAt img fs (1%2) (1%2) x y
-    (error, closestCell) = closestCellByPixel centerPixel openCellMiddlePixels
+    centerPixel = inCellPixelAt img fs (InCellPosition (1%2) (1%2)) pos
+    (error, closestCellType) = closestCellTypeByPixel centerPixel openCellTypeMiddlePixels
 
 
 readCellAt
-  :: Image PixelRGB8 -> FieldSize -> Int -> Int
+  :: Image PixelRGB8 -> FieldSize -> Position
   -> Writer [ReadCellMsg] (Maybe Cell)
-readCellAt img fs x y = do
-  ifM (isFieldOrFlag img fs x y)
-    ( ifM (isFlag img fs x y)
-      ( return . Just $ Flag )
-      ( return . Just $ Field )
+readCellAt img fs pos = do
+  ifM (isFieldOrFlag img fs pos)
+    ( ifM (isFlag img fs pos)
+      ( return . Just $ Cell Flag pos )
+      ( return . Just $ Cell Field pos )
     )
-    ( ifM (isNumber4 img fs x y)
-      ( return . Just $ Number 4 )
-      ( readOpenCellMiddleAt img fs x y)
+    ( ifM (isNumber4 img fs pos)
+      ( return . Just $ Cell (Number 4) pos )
+      ( readOpenCellMiddleAt img fs pos)
     )
 
 readFieldWithMsgs
@@ -217,7 +223,7 @@ readFieldWithMsgs
   -> [[(Maybe Cell, [ReadCellMsg])]]
 readFieldWithMsgs img fs@FieldSize {..}
   = [
-      [runWriter $ readCellAt img fs x y
+      [runWriter $ readCellAt img fs (Position x y)
       | x <- [0 .. fieldWidth - 1]]
     | y <- [0..fieldHeight - 1]
     ]
@@ -256,7 +262,7 @@ digCell = undefined
 
 -- r <- returnSession remoteConfig (openFieldWithMsgs Easy)
 -- r <- returnSession remoteConfig (openField Medium)
--- pPrintNoColor (snd r)
+-- pPrintNoColor (map (map cellType) . snd $ r)
 -- pPrintNoColor . fromCellsWithMsgs $ snd r
 -- pPrintNoColor =<< runWD (fst r) readFieldFromScreen
 -- r <- returnSession remoteConfig (openFieldWithMsgs Hard)
