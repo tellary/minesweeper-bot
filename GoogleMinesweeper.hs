@@ -7,6 +7,7 @@ import           Bot
 import           Codec.Picture
 import           Codec.Picture.Extra        (crop)
 import           Control.Concurrent         (threadDelay)
+import           Control.DeepSeq            (rnf)
 import           Control.Monad              (forM_)
 import           Control.Monad.Extra        (ifM)
 import           Control.Monad.IO.Class     (liftIO)
@@ -51,8 +52,8 @@ openGame size = do
 
   canvas <- findElem (ByTag "canvas")
   click canvas
-  -- wait 3 seconds to allow visual effects to pass
-  liftIO (threadDelay (3*1000*1000))
+  -- wait 1 second to allow visual effects to pass
+  liftIO (threadDelay (1*1000*1000))
   takeFieldScreenshot
 
 selectSize Medium = return ()
@@ -64,6 +65,7 @@ selectSize size = do
 
 takeFieldScreenshot :: WD DynamicImage
 takeFieldScreenshot = do
+  moveToFrom (0, 0) =<< findElem (ByTag "body")
   canvas <- findElem (ByTag "canvas")
   (x, y) <- elemPos canvas
   liftIO (putStrLn $ "(x, y): " ++ show (x, y))
@@ -285,37 +287,84 @@ openFieldWithMsgs size = do
 -- r <- returnSession remoteConfig (openFieldWithMsgs Hard)
 -- img <- runWD (fst r) (convertRGB8 <$> takeFieldScreenshot)
 
-rightClickCanvas :: WD ()
-rightClickCanvas = do
-  canvas <- findElem (ByTag "canvas")
-  moveToFrom (10, 10) canvas
-  clickWith RightButton
--- runWD (fst r) rightClickCanvas
-markCell :: Element -> ImgFieldSize -> Position -> WD ()
-markCell canvas fs pos = do
+moveToCell :: Element -> ImgFieldSize -> Position -> WD ()
+moveToCell canvas fs pos = do
   (x, y) <- elemPos canvas
   let centerCell = inCellAt fs (InCellPosition (1%2) (1%2)) pos
   let screenPos
         = ( fst centerCell `div` 2
           , snd centerCell `div` 2
           )
-  liftIO . putStrLn $ "markCell: " ++ show screenPos
+  liftIO . putStrLn $ "moveToCell: " ++ show screenPos
   moveToFrom screenPos canvas
+  
+markCell :: Element -> ImgFieldSize -> Position -> WD ()
+markCell canvas fs pos = do
+  moveToCell canvas fs pos
   clickWith RightButton
 
-markCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
-markCells fs cellPositions = do
-  canvas <- findElem (ByTag "canvas")
-  forM_ cellPositions (markCell canvas fs)
+digAroundCell canvas fs pos = do
+  moveToCell canvas fs pos
+  withMouseDown (clickWith RightButton)
 
-performMarkIfMatchNumber :: GameField -> WD ()
-performMarkIfMatchNumber field
-  = markCells
+performOnCells
+  :: Foldable t
+  => (Element -> ImgFieldSize -> Position -> WD ())
+  -> ImgFieldSize
+  -> t Position
+  -> WD ()
+performOnCells action fs cellPositions = do
+  canvas <- findElem (ByTag "canvas")
+  forM_ cellPositions (action canvas fs)
+
+markCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
+markCells = performOnCells markCell
+
+digAroundCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
+digAroundCells = performOnCells digAroundCell
+
+performMarkIfMatchNumber :: GameField -> WD Bool
+performMarkIfMatchNumber field = do
+  let cellsToMark = markIfMatchNumber (gameField field)
+  markCells
     (gameFieldSize field)
-    (nub . fold $ snd <$> markIfMatchNumber (gameField field))
+    cellsToMark
+  return . not . null $ cellsToMark
 -- r <- returnSession remoteConfig (openField Medium)
 -- runWD (fst r) $ performMarkIfMatchNumber (snd r)
 -- runWD (fst r) (performMarkIfMatchNumber =<< readFieldFromScreen)
 
-digCell :: IO ()
-digCell = undefined
+performDigAroundIfMatchNumber :: GameField -> WD ()
+performDigAroundIfMatchNumber field = do
+  rnf (gameField field)
+    `seq`
+    digAroundCells (gameFieldSize field) (digIfMatchNumber (gameField field))
+-- runWD (fst r) (performDigAroundIfMatchNumber =<< readFieldFromScreen)
+
+play start size = do
+  openGame size
+  continuePlay
+continuePlay = do
+  marked <- performMarkIfMatchNumber =<< readFieldFromScreen
+  if marked
+    then do
+      performDigAroundIfMatchNumber =<< readFieldFromScreen
+      continuePlay
+    else do
+      exitPlay 1
+
+exitPlay 5 = do
+  liftIO $ putStrLn "Stopped playing"
+  return ()
+exitPlay count = do
+  performDigAroundIfMatchNumber =<< readFieldFromScreen
+  marked <- performMarkIfMatchNumber =<< readFieldFromScreen
+  if marked
+    then
+      continuePlay
+    else do
+      liftIO . putStrLn $ "No flags set, count: " ++ show count
+      exitPlay (count + 1)
+
+-- r <- returnSession remoteConfig (play True Medium)
+-- runWD (fst r) continuePlay

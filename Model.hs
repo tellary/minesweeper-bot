@@ -1,11 +1,21 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Model where
 
+import Control.DeepSeq
 import Data.Functor.Compose
+import GHC.Generics         (Generic)
 
-data Cell = Cell { cellType :: CellType, pos :: Position } deriving (Eq, Show)
-data CellType = Open | Number Int | Field | Flag | Mine deriving (Eq, Show)
+data Cell
+  = Cell { cellType :: CellType, pos :: Position }
+  deriving (Eq, Show, Generic)
+data CellType
+  = Open | Number Int | Field | Flag | Mine
+  deriving (Eq, Show, Generic)
+
+instance NFData CellType
+instance NFData Cell
 
 isFlag (Cell Flag _) = True
 isFlag _ = False
@@ -13,11 +23,23 @@ isFlag _ = False
 isField (Cell Field _) = True
 isField _ = False
 
-data Position = Position { x :: Int , y :: Int } deriving (Eq, Show)
+data Position
+  = Position { x :: Int , y :: Int }
+  deriving (Eq, Show, Generic)
+
+instance NFData Position
 
 newtype Field a
   = MkField (Compose [] [] a)
-  deriving (Show, Functor, Applicative, Foldable)
+  deriving
+    ( Show
+    , Functor
+    , Applicative
+    , Foldable
+    , Generic
+    )
+
+instance NFData a => NFData (Field a)
 
 mkField :: [[a]] -> Field a
 mkField f = MkField $ Compose f

@@ -2,6 +2,8 @@
 
 module Bot where
 
+import Data.Foldable (fold, toList)
+import Data.List     (nub)
 import Model
 
 neighbors field pos =
@@ -30,12 +32,23 @@ markPosIfMatchNumber field pos
     flagCells  = filter isFlag  (neighbors field pos)
     fieldCells = filter isField (neighbors field pos)
 
-markIfMatchNumber :: CellField -> Field (Position, [Position])
-markIfMatchNumber field
-  = flip fmap field
-    $ \cell
-      -> (pos cell, markPosIfMatchNumber field $ pos cell)
+digPosIfMatchNumber :: CellField -> Position -> Bool
+digPosIfMatchNumber field pos
+  = case cell of
+      Cell (Number n) _ -> length flagCells == n && not (null fieldCells)
+      _ -> False
+  where
+    cell = cellAt field pos
+    flagCells  = filter isFlag  (neighbors field pos)
+    fieldCells = filter isField (neighbors field pos)
 
+markIfMatchNumber :: CellField -> [Position]
+markIfMatchNumber field
+  = nub . fold . fmap (markPosIfMatchNumber field . pos) $ field
+
+digIfMatchNumber :: CellField -> [Position]
+digIfMatchNumber field
+  = filter (digPosIfMatchNumber field) . map pos . toList $ field
 -- :l Bot GoogleMinesweeper
 -- import GoogleMinesweeper
 -- r <- returnSession remoteConfig (openField Easy)
