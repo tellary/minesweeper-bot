@@ -234,16 +234,16 @@ fromCellsWithMsgs fieldWithMsgs = do
     (cell, msgs) <- rowOfCells
     return $ maybe (error $ show msgs) id cell
 
-readField :: Image PixelRGB8 -> FieldSize -> Field
+readField :: Image PixelRGB8 -> FieldSize -> CellField
 readField img fs
-  =  fromCellsWithMsgs $ readFieldWithMsgs img fs
+  =  mkField . fromCellsWithMsgs $ readFieldWithMsgs img fs
 
 readFieldFromScreen0 readFieldF = do
   img <- convertRGB8 <$> takeFieldScreenshot
   let fs = readFieldSize img
   return $ readFieldF img fs
 
-readFieldFromScreen :: WD Field
+readFieldFromScreen :: WD CellField
 readFieldFromScreen = readFieldFromScreen0 readField
 
 readFieldFromScreenWithMsg = readFieldFromScreen0 readFieldWithMsgs
