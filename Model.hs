@@ -79,4 +79,4 @@ data ImgFieldSize
   = ImgFieldSize
   { imgFieldSize :: FieldSize
   , imgCellSize :: Int
-  }
+  } deriving Show
