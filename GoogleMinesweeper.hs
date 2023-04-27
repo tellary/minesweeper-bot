@@ -134,7 +134,7 @@ openDark = PixelRGB8 211 185 157
 openBlue1 = PixelRGB8 52 119 203
 openGreen2 = PixelRGB8 106 151 88
 openRed3 = PixelRGB8 195 63 56
-openPurple4 = PixelRGB8 113 45 156
+openPurple4 = PixelRGB8 113 39 156
 openOrange5 = PixelRGB8 234 168 89
 openBlue6 = PixelRGB8 113 167 163
 
@@ -163,6 +163,7 @@ data ReadCellMsg
   { msgType :: ReadCellMsgType
   , pos :: Position
   , pixel :: PixelRGB8
+  , pixelError :: Float
   } deriving Show
 
 data ReadCellMsgType
@@ -176,29 +177,33 @@ data ReadCellMsgType
   | IsNotNumber4Msg
   deriving Show
 
+errorThreshold = 25
+
 isFieldOrFlag
   :: Image PixelRGB8 -> ImgFieldSize -> Position
   -> Writer [ReadCellMsg] Bool
 isFieldOrFlag img fs pos
-  | error < 25
-  = writer (True, [ReadCellMsg IsFieldOrFlagMsg pos topLeftCornerPixel])
+  | error < errorThreshold
+  = writer (True, [ReadCellMsg IsFieldOrFlagMsg pos topLeftCornerPixel error])
   | otherwise
-  = writer (False, [ReadCellMsg IsNotFieldOrFlagMsg pos topLeftCornerPixel])
+  = writer (False, [ReadCellMsg IsNotFieldOrFlagMsg pos topLeftCornerPixel error])
   where
     topLeftCornerPixel
       = inCellPixelAt img fs (InCellPosition (1%10) (1%10)) pos
     (error, _) = closestCellTypeByPixel topLeftCornerPixel fieldPixels
 
 isFlag img fs pos
-  | error < 25 = writer (True, [ReadCellMsg IsFlagMsg pos pixel])
-  | otherwise = writer (False, [ReadCellMsg IsNotFlagMsg pos pixel])
+  | error < errorThreshold
+  = writer (True, [ReadCellMsg IsFlagMsg pos pixel error])
+  | otherwise = writer (False, [ReadCellMsg IsNotFlagMsg pos pixel error])
   where
     pixel = inCellPixelAt img fs (InCellPosition (1%4) (1%4)) pos
     error = pixelDistance pixel flag
 
 isNumber4 img fs pos
-  | error < 5 = writer (True, [ReadCellMsg IsNumber4Msg pos pixel])
-  | otherwise = writer (False, [ReadCellMsg IsNotNumber4Msg pos pixel])
+  | error < 5
+  = writer (True, [ReadCellMsg IsNumber4Msg pos pixel error])
+  | otherwise = writer (False, [ReadCellMsg IsNotNumber4Msg pos pixel error])
   where
     pixel = inCellPixelAt img fs (InCellPosition (35%60) (35%60)) pos
     error = pixelDistance pixel openPurple4
@@ -207,11 +212,11 @@ readOpenCellMiddleAt
   :: Image PixelRGB8 -> ImgFieldSize -> Position
   -> Writer [ReadCellMsg] (Maybe Cell)
 readOpenCellMiddleAt img fs pos
-  | error < 25 = do
-      tell [ReadCellMsg ReadOpenCellSuccessMsg pos centerPixel]
+  | error < errorThreshold = do
+      tell [ReadCellMsg ReadOpenCellSuccessMsg pos centerPixel error]
       return . Just $ Cell closestCellType pos
   | otherwise = do
-      tell [ReadCellMsg ReadOpenCellFailedMsg pos centerPixel]
+      tell [ReadCellMsg ReadOpenCellFailedMsg pos centerPixel error]
       return Nothing
   where
     centerPixel = inCellPixelAt img fs (InCellPosition (1%2) (1%2)) pos
