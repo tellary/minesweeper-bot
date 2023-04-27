@@ -9,11 +9,14 @@ import           Codec.Picture.Extra        (crop)
 import           Control.Concurrent         (threadDelay)
 import           Control.DeepSeq            (rnf)
 import           Control.Monad              (forM_)
+import           Control.Monad.Catch        (Exception, MonadThrow, handle,
+                                             throwM)
 import           Control.Monad.Extra        (ifM)
 import           Control.Monad.IO.Class     (liftIO)
 import           Control.Monad.Writer       (Writer, runWriter, tell, writer)
 import           Data.ByteString.Lazy       (ByteString, toStrict)
 import           Data.Foldable              (fold)
+import           Data.Functor.Compose       (Compose (Compose), getCompose)
 import           Data.List                  (group, minimumBy, nub)
 import           Data.Ord                   (comparing)
 import           Data.Ratio                 (Ratio, denominator, numerator, (%))
@@ -239,11 +242,23 @@ readFieldWithMsgs img fs@ImgFieldSize {imgFieldSize = FieldSize{..}}
     | y <- [0..fieldHeight - 1]
     ]
 
-fromCellsWithMsgs fieldWithMsgs = do
-  rowOfCells <- fieldWithMsgs
-  return $ do
-    (cell, msgs) <- rowOfCells
-    return $ maybe (error $ show msgs) id cell
+data ReadFieldException = ReadFieldException [ReadCellMsg] deriving Show
+
+instance Exception ReadFieldException
+
+fromCellsWithMsgs
+  :: MonadThrow m => [[(Maybe Cell, [ReadCellMsg])]] -> m [[Cell]]
+fromCellsWithMsgs cellsWithMsgs
+  = either
+    (\msgs -> throwM $ ReadFieldException msgs)
+    (return . getCompose)
+    eitherMsgsOrCells
+  where
+    xs = Compose cellsWithMsgs
+    es = fmap
+         (\(cell, msgs) -> maybe (Left msgs) Right cell)
+         xs
+    eitherMsgsOrCells = sequence es
 
 data GameField
   = GameField
@@ -252,15 +267,15 @@ data GameField
   , gameField :: CellField
   }
 
-readField :: Image PixelRGB8 -> ImgFieldSize -> CellField
+readField :: MonadThrow m => Image PixelRGB8 -> ImgFieldSize -> m CellField
 readField img fs
-  =  mkField . fromCellsWithMsgs $ readFieldWithMsgs img fs
+  =  mkField <$> (fromCellsWithMsgs $ readFieldWithMsgs img fs)
 
 readFieldFromScreen :: WD GameField
 readFieldFromScreen = do
   img <- convertRGB8 <$> takeFieldScreenshot
   let fs = readImgFieldSize img
-  return $ GameField img fs (readField img fs)
+  GameField img fs <$> readField img fs
 
 readFieldFromScreenWithMsg = do
   img <- convertRGB8 <$> takeFieldScreenshot
@@ -271,7 +286,7 @@ openField size = do
   screen <- openGame size
   let img = convertRGB8 screen
   let fs = readImgFieldSize img
-  return $ GameField img fs (readField img fs)
+  return . GameField img fs <$> readField img fs
 
 openFieldWithMsgs size = do
   screen <- openGame size
@@ -283,7 +298,7 @@ openFieldWithMsgs size = do
 -- r <- returnSession remoteConfig (openField Medium)
 -- pPrintNoColor (map (map cellType) . snd $ r)
 -- pPrintNoColor . fromCellsWithMsgs $ snd r
--- pPrintNoColor =<< runWD (fst r) readFieldFromScreen
+-- pPrintNoColor =<< (runWD (fst r) $ (fmap cellType . gameField) <$> readFieldFromScreen)
 -- r <- returnSession remoteConfig (openFieldWithMsgs Hard)
 -- img <- runWD (fst r) (convertRGB8 <$> takeFieldScreenshot)
 
@@ -344,7 +359,10 @@ performDigAroundIfMatchNumber field = do
 play start size = do
   openGame size
   continuePlay
-continuePlay = do
+
+continuePlay = handle (
+  \(e :: ReadFieldException) -> liftIO (putStrLn . show $ e) >> continuePlay
+  ) $ do
   marked <- performMarkIfMatchNumber =<< readFieldFromScreen
   if marked
     then do
@@ -353,7 +371,7 @@ continuePlay = do
     else do
       exitPlay 1
 
-exitPlay 5 = do
+exitPlay 1000 = do
   liftIO $ putStrLn "Stopped playing"
   return ()
 exitPlay count = do
@@ -367,4 +385,5 @@ exitPlay count = do
       exitPlay (count + 1)
 
 -- r <- returnSession remoteConfig (play True Medium)
+-- r <- returnSession remoteConfig (openGame Hard)
 -- runWD (fst r) continuePlay
