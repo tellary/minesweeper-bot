@@ -282,16 +282,22 @@ readFieldFromScreen = do
   let fs = readImgFieldSize img
   GameField img fs <$> readField img fs
 
+updateFieldFromScreen field = do
+  img <- convertRGB8 <$> takeFieldScreenshot
+  cellField <- readField img (gameFieldSize field)
+  return field { gameImage = img, gameField = cellField }
+
 readFieldFromScreenWithMsg = do
   img <- convertRGB8 <$> takeFieldScreenshot
   let fs = readImgFieldSize img
   return $ readFieldWithMsgs img fs
 
+openField :: GameSize -> WD GameField
 openField size = do
   screen <- openGame size
   let img = convertRGB8 screen
   let fs = readImgFieldSize img
-  return . GameField img fs <$> readField img fs
+  GameField img fs <$> readField img fs
 
 openFieldWithMsgs size = do
   screen <- openGame size
@@ -361,34 +367,41 @@ performDigAroundIfMatchNumber field = do
     digAroundCells (gameFieldSize field) (digIfMatchNumber (gameField field))
 -- runWD (fst r) (performDigAroundIfMatchNumber =<< readFieldFromScreen)
 
-play start size = do
-  openGame size
-  continuePlay
+play size = do
+  field <- openField size
+  continuePlay field
 
-continuePlay = handle (
-  \(e :: ReadFieldException) -> liftIO (putStrLn . show $ e) >> continuePlay
+continuePlay :: GameField -> WD ()
+continuePlay field = handle (
+  \(e :: ReadFieldException)
+  -> liftIO (putStrLn . show $ e) >> continuePlay field
   ) $ do
-  marked <- performMarkIfMatchNumber =<< readFieldFromScreen
+  field' <- updateFieldFromScreen field
+  marked <- performMarkIfMatchNumber field'
   if marked
     then do
-      performDigAroundIfMatchNumber =<< readFieldFromScreen
-      continuePlay
+      field'' <- updateFieldFromScreen field'
+      performDigAroundIfMatchNumber field''
+      continuePlay field''
     else do
-      exitPlay 1
+      exitPlay field' 1
 
-exitPlay 1000 = do
+exitPlay :: GameField -> Int -> WD ()
+exitPlay _ 1000 = do
   liftIO $ putStrLn "Stopped playing"
   return ()
-exitPlay count = do
-  performDigAroundIfMatchNumber =<< readFieldFromScreen
-  marked <- performMarkIfMatchNumber =<< readFieldFromScreen
+exitPlay field count = do
+  field' <- updateFieldFromScreen field
+  performDigAroundIfMatchNumber field'
+  field'' <- updateFieldFromScreen field'
+  marked <- performMarkIfMatchNumber field''
   if marked
     then
-      continuePlay
+      continuePlay field''
     else do
       liftIO . putStrLn $ "No flags set, count: " ++ show count
-      exitPlay (count + 1)
+      exitPlay field'' (count + 1)
 
 -- r <- returnSession remoteConfig (play True Medium)
--- r <- returnSession remoteConfig (openGame Hard)
--- runWD (fst r) continuePlay
+-- r <- returnSession remoteConfig (openField Hard)
+-- runWD (fst r) $ continuePlay (snd r)
