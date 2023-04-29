@@ -137,6 +137,7 @@ openRed3 = PixelRGB8 195 63 56
 openPurple4 = PixelRGB8 113 39 156
 openOrange5 = PixelRGB8 234 168 89
 openBlue6 = PixelRGB8 113 167 163
+openBlack7 = PixelRGB8 66 66 66
 
 fieldPixels =
   [ (fieldGreenLight, Field)
@@ -151,6 +152,7 @@ openCellTypeMiddlePixels =
   , (openRed3, Number 3)
   , (openOrange5, Number 5)
   , (openBlue6, Number 6)
+  , (openBlack7, Number 7)
   ]
 
 closestCellTypeByPixel pixel pixels
@@ -201,7 +203,7 @@ isFlag img fs pos
     error = pixelDistance pixel flag
 
 isNumber4 img fs pos
-  | error < 5
+  | error < 7
   = writer (True, [ReadCellMsg IsNumber4Msg pos pixel error])
   | otherwise = writer (False, [ReadCellMsg IsNotNumber4Msg pos pixel error])
   where
