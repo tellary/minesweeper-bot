@@ -2,8 +2,9 @@
 
 module Bot where
 
+import Control.Monad (join)
 import Data.Foldable (fold, toList)
-import Data.List     (find, nub)
+import Data.List     (find, group, nub, transpose)
 import Model
 
 neighbors field pos =
@@ -44,7 +45,7 @@ digPosIfMatchNumber field pos
 
 markIfMatchNumber :: CellField -> [Position]
 markIfMatchNumber field
-  = nub . fold . fmap (markPosIfMatchNumber field . pos) $ field
+  = fold . fmap (markPosIfMatchNumber field . pos) $ field
 
 digIfMatchNumber :: CellField -> [Position]
 digIfMatchNumber field
@@ -82,15 +83,20 @@ neighborsCombinations field pos n
 -- f = mkField [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 -- neighborsCombinations f (Position 0 0) 2 == [[4,2],[4,5],[2,5]]
 
-flagableFieldCombinations field pos n
-  = filter (null . find (not . isField))
-  $ _neighborCombinations
-  where
-    _neighbors = neighbors field pos
-    _flagCells  = length $ filter isFlag _neighbors
-    _combinations = combinations (n - _flagCells) (length _neighbors)
-    _neighborCombinations
-      = map (map fst . filter snd . zip _neighbors) _combinations
+flagableFieldCombinations field pos
+  = case cellAt field pos of
+      (Cell (Number n) _)
+        -> map (map (\cell -> cell { cellType = Flag }))
+           . filter (null . find (not . isField))
+           $ _neighborCombinations
+        where
+          _neighbors = neighbors field pos
+          _flagCells  = length $ filter isFlag _neighbors
+          _combinations = combinations (n - _flagCells) (length _neighbors)
+          _neighborCombinations
+            = map (map fst . filter snd . zip _neighbors) _combinations
+      _ -> [[]]
+
 
 positionsField n m
   = mkField
@@ -99,9 +105,49 @@ positionsField n m
   ]
 testFieldTypes1
   = mkField
-  [ [Field, Open    , Field]
-  , [Open , Number 2, Open ]
-  , [Field, Open    , Open ]
+  [ [Field   , Field   , Field   ]
+  , [Number 1, Number 2, Number 1]
+  , [Field   , Open    , Open    ]
   ]
 testField1 = Cell <$> testFieldTypes1 <*> positionsField 3 3
--- pPrintNoColor $ flagableFieldCombinations testField1 (Position 1 1) 2
+-- pPrintNoColor $ flagableFieldCombinations testField1 (Position 1 1)
+
+overrideCells override cells = do
+  cell <- cells
+  let overrideMaybe = find (\cell' -> pos cell == pos cell') override
+  return $ maybe cell id overrideMaybe
+-- pPrint $ overrideCells (flagableFieldCombinations testField1 (Position 1 1) !! 1) (neighbors testField1 (Position 2 1))
+
+flagsPossibleOnCell field flags (Cell (Number n) pos)
+  = _newNumberOfFlags <= n
+  where
+    _neighbors = neighbors field pos
+    _overrideCells = overrideCells flags _neighbors
+    _newNumberOfFlags = length . filter isFlag $ _overrideCells
+flagsPossibleOnCell _ _ _ = error "flagsPossibleOnCell: must be number"
+-- flagsPossibleOnCell testField1 (flagableFieldCombinations testField1 (Position 1 1) !! 1) (cellAt testField1 (Position 2 1))
+-- flagsPossibleOnCell testField1 (flagableFieldCombinations testField1 (Position 1 1) !! 5) (cellAt testField1 (Position 2 1))
+
+areFlagsPossibleOnAllNeighbors field pos flags
+  = all _flagsPossibleOnNeighbor _numbers
+  where
+    _neighbors = neighbors field pos
+    _numbers = filter isNumber _neighbors
+    _flagsPossibleOnNeighbor = flagsPossibleOnCell field flags
+-- pPrint $ filter (areFlagsPossibleOnAllNeighbors testField1 (Position 1 1)) $ flagableFieldCombinations testField1 (Position 1 1)
+
+markPosIfPossibleInAllCombinations field pos
+  = join
+    . map (map head)
+    . filter ((==1) . length)
+    . map group
+    . transpose
+    . map (map Model.pos)
+    . filter (areFlagsPossibleOnAllNeighbors field pos)
+    $ flagableFieldCombinations field pos
+
+markIfPossibleInAllCombinations :: CellField -> [Position]
+markIfPossibleInAllCombinations field
+  = fold . fmap (markPosIfPossibleInAllCombinations field . pos) $ field
+
+mark field = nub $ markIfMatchNumber field ++ markIfPossibleInAllCombinations field

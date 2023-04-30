@@ -351,16 +351,16 @@ markCells = performOnCells markCell
 digAroundCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
 digAroundCells = performOnCells digAroundCell
 
-performMarkIfMatchNumber :: GameField -> WD Bool
-performMarkIfMatchNumber field = do
-  let cellsToMark = markIfMatchNumber (gameField field)
+performMark :: GameField -> WD Bool
+performMark field = do
+  let cellsToMark = mark (gameField field)
   markCells
     (gameFieldSize field)
     cellsToMark
   return . not . null $ cellsToMark
 -- r <- returnSession remoteConfig (openField Medium)
--- runWD (fst r) $ performMarkIfMatchNumber (snd r)
--- runWD (fst r) (performMarkIfMatchNumber =<< readFieldFromScreen)
+-- runWD (fst r) $ performMark (snd r)
+-- runWD (fst r) (performMark =<< readFieldFromScreen)
 
 performDigAroundIfMatchNumber :: GameField -> WD ()
 performDigAroundIfMatchNumber field = do
@@ -379,7 +379,7 @@ continuePlay field = handle (
   -> liftIO (putStrLn . show $ e) >> continuePlay field
   ) $ do
   field' <- updateFieldFromScreen field
-  marked <- performMarkIfMatchNumber field'
+  marked <- performMark field'
   if marked
     then do
       field'' <- updateFieldFromScreen field'
@@ -396,7 +396,7 @@ exitPlay field count = do
   field' <- updateFieldFromScreen field
   performDigAroundIfMatchNumber field'
   field'' <- updateFieldFromScreen field'
-  marked <- performMarkIfMatchNumber field''
+  marked <- performMark field''
   if marked
     then
       continuePlay field''

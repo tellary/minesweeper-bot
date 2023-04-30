@@ -25,6 +25,9 @@ isFlag _ = False
 isField (Cell Field _) = True
 isField _ = False
 
+isNumber (Cell (Number _) _) = True
+isNumber _ = False
+
 data Position
   = Position { x :: Int , y :: Int }
   deriving (Eq, Show, Generic)
