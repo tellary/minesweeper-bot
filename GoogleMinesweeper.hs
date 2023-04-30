@@ -404,6 +404,6 @@ exitPlay field count = do
       liftIO . putStrLn $ "No flags set, count: " ++ show count
       exitPlay field'' (count + 1)
 
--- r <- returnSession remoteConfig (play True Medium)
+-- r <- returnSession remoteConfig (play Hard)
 -- r <- returnSession remoteConfig (openField Hard)
 -- runWD (fst r) $ continuePlay (snd r)

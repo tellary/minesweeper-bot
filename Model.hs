@@ -3,7 +3,9 @@
 
 module Model where
 
+import Control.Applicative
 import Control.DeepSeq
+import Data.Functor.Classes (Show1)
 import Data.Functor.Compose
 import GHC.Generics         (Generic)
 
@@ -30,7 +32,7 @@ data Position
 instance NFData Position
 
 newtype Field a
-  = MkField (Compose [] [] a)
+  = MkField (Compose ZipList ZipList a)
   deriving
     ( Show
     , Functor
@@ -39,11 +41,14 @@ newtype Field a
     , Generic
     )
 
+deriving instance Show1 (ZipList)
 instance NFData a => NFData (Field a)
 
 mkField :: [[a]] -> Field a
-mkField f = MkField $ Compose f
-unField (MkField compose) = getCompose compose
+mkField f = MkField . Compose . ZipList . map ZipList $ f
+
+unField :: Field a -> [[a]]
+unField (MkField compose) = getZipList . fmap getZipList . getCompose $ compose
 
 type CellField = Field Cell
 
