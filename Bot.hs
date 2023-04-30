@@ -3,7 +3,7 @@
 module Bot where
 
 import Data.Foldable (fold, toList)
-import Data.List     (nub)
+import Data.List     (find, nub)
 import Model
 
 neighbors field pos =
@@ -56,3 +56,52 @@ digIfMatchNumber field
 -- import Test.WebDriver
 -- f <- runWD (fst r) readFieldFromScreen
 -- markIfMatchNumber f (Position 0 0)
+
+type NumItems = Int
+type NumPositions = Int
+
+combinations :: NumItems -> NumPositions -> [[Bool]]
+combinations _ 0 = [[]]
+combinations 0 _ = [[]]
+combinations 1 1 = [[True]]
+combinations 1 m
+  = (True : (take (m - 1) $ repeat False))
+  : (map (False:) $ combinations 1 (m - 1))
+combinations n m
+  | n >  m = [[]]
+  | n == m = [take n $ repeat True]
+  | otherwise
+  =  (map (True :) $ combinations (n - 1) (m - 1))
+  ++ (map (False:) $ combinations  n      (m - 1))
+
+neighborsCombinations field pos n
+  = map (map fst . filter snd . zip _neighbors) _combinations
+  where
+    _neighbors = neighbors field pos
+    _combinations = combinations n (length _neighbors)
+-- f = mkField [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+-- neighborsCombinations f (Position 0 0) 2 == [[4,2],[4,5],[2,5]]
+
+flagableFieldCombinations field pos n
+  = filter (null . find (not . isField))
+  $ _neighborCombinations
+  where
+    _neighbors = neighbors field pos
+    _flagCells  = length $ filter isFlag _neighbors
+    _combinations = combinations (n - _flagCells) (length _neighbors)
+    _neighborCombinations
+      = map (map fst . filter snd . zip _neighbors) _combinations
+
+positionsField n m
+  = mkField
+  [ [ Position x y | x <- [0 .. n - 1] ]
+    | y <- [0 .. m - 1]
+  ]
+testFieldTypes1
+  = mkField
+  [ [Field, Open    , Field]
+  , [Open , Number 2, Open ]
+  , [Field, Open    , Open ]
+  ]
+testField1 = Cell <$> testFieldTypes1 <*> positionsField 3 3
+-- pPrintNoColor $ flagableFieldCombinations testField1 (Position 1 1) 2
