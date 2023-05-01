@@ -5,6 +5,7 @@ module Model where
 
 import Control.Applicative
 import Control.DeepSeq
+import Control.Lens
 import Data.Functor.Classes (Show1)
 import Data.Functor.Compose
 import GHC.Generics         (Generic)
@@ -13,7 +14,7 @@ data Cell
   = Cell { cellType :: CellType, pos :: Position }
   deriving (Eq, Show, Generic)
 data CellType
-  = Open | Number Int | Field | Flag | Mine
+  = Open | Number Int | Field | Flag | Mine | OpenUnknown
   deriving (Eq, Show, Generic)
 
 instance NFData CellType
@@ -27,6 +28,13 @@ isField _ = False
 
 isNumber (Cell (Number _) _) = True
 isNumber _ = False
+
+isOpen (Cell Open _) = True
+isOpen (Cell OpenUnknown _) = True
+isOpen _ = False
+
+isOpenUnknown (Cell OpenUnknown _) = True
+isOpenUnknown _ = False
 
 data Position
   = Position { x :: Int , y :: Int }
@@ -82,6 +90,15 @@ fieldAt field pos = cellRow !! (x pos)
 
 cellAt :: CellField -> Position -> Cell
 cellAt = fieldAt
+
+updateAt field (Position x y) a
+  = mkField ((unField field) & element y . element x .~ a)
+
+updateCell field cell@(Cell _ pos)
+  = updateAt field pos cell
+
+updateCells field cells
+  = foldl updateCell field cells
 
 data ImgFieldSize
   = ImgFieldSize

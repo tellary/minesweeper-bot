@@ -83,6 +83,7 @@ neighborsCombinations field pos n
 -- f = mkField [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 -- neighborsCombinations f (Position 0 0) 2 == [[4,2],[4,5],[2,5]]
 
+flagableFieldCombinations :: CellField -> Position -> [[Cell]]
 flagableFieldCombinations field pos
   = case cellAt field pos of
       (Cell (Number n) _)
@@ -112,28 +113,29 @@ testFieldTypes1
 testField1 = Cell <$> testFieldTypes1 <*> positionsField 3 3
 -- pPrintNoColor $ flagableFieldCombinations testField1 (Position 1 1)
 
-overrideCells override cells = do
+overrideCells = overrideCellsIf (const True)
+overrideCellsIf p override cells = do
   cell <- cells
   let overrideMaybe = find (\cell' -> pos cell == pos cell') override
-  return $ maybe cell id overrideMaybe
+  return $ maybe cell (\cell' -> if p cell' then cell' else cell) overrideMaybe
 -- pPrint $ overrideCells (flagableFieldCombinations testField1 (Position 1 1) !! 1) (neighbors testField1 (Position 2 1))
 
-flagsPossibleOnCell field flags (Cell (Number n) pos)
+areFlagsPossibleOnCell field flags (Cell (Number n) pos)
   = _newNumberOfFlags <= n
   where
     _neighbors = neighbors field pos
     _overrideCells = overrideCells flags _neighbors
     _newNumberOfFlags = length . filter isFlag $ _overrideCells
-flagsPossibleOnCell _ _ _ = error "flagsPossibleOnCell: must be number"
--- flagsPossibleOnCell testField1 (flagableFieldCombinations testField1 (Position 1 1) !! 1) (cellAt testField1 (Position 2 1))
--- flagsPossibleOnCell testField1 (flagableFieldCombinations testField1 (Position 1 1) !! 5) (cellAt testField1 (Position 2 1))
+areFlagsPossibleOnCell _ _ _ = error "areFlagsPossibleOnCell: must be number"
+-- areFlagsPossibleOnCell testField1 (flagableFieldCombinations testField1 (Position 1 1) !! 1) (cellAt testField1 (Position 2 1))
+-- areFlagsPossibleOnCell testField1 (flagableFieldCombinations testField1 (Position 1 1) !! 5) (cellAt testField1 (Position 2 1))
 
 areFlagsPossibleOnAllNeighbors field pos flags
   = all _flagsPossibleOnNeighbor _numbers
   where
     _neighbors = neighbors field pos
     _numbers = filter isNumber _neighbors
-    _flagsPossibleOnNeighbor = flagsPossibleOnCell field flags
+    _flagsPossibleOnNeighbor = areFlagsPossibleOnCell field flags
 -- pPrint $ filter (areFlagsPossibleOnAllNeighbors testField1 (Position 1 1)) $ flagableFieldCombinations testField1 (Position 1 1)
 
 markPosIfPossibleInAllCombinations field pos
@@ -151,3 +153,123 @@ markIfPossibleInAllCombinations field
   = fold . fmap (markPosIfPossibleInAllCombinations field . pos) $ field
 
 mark field = nub $ markIfMatchNumber field ++ markIfPossibleInAllCombinations field
+
+testFieldTypes2
+  = mkField
+  [ [Field   , Field   , Field   , Field   ]
+  , [Number 1, Number 1, Number 1, Number 1]
+  , [Open    , Open    , Open    , Open    ]
+  ]
+testField2 = Cell <$> testFieldTypes2 <*> positionsField 4 3
+-- pPrint $ flagableFieldCombinations testField2 (Position 1 1)
+-- pPrint $ overrideCells (flagableFieldCombinations testField2 (Position 1 1) !! 1) (neighbors testField2 (Position 2 1))
+
+openAroundOneCellIfMatchNumber :: CellField -> Cell -> Maybe CellField
+openAroundOneCellIfMatchNumber field (Cell (Number n) pos)
+  | length flagCells == n && length fieldCells > 0
+  = Just $ foldl
+    (\field fieldCell
+      -> updateCell field fieldCell { cellType = OpenUnknown }
+    )
+    field
+    fieldCells
+  | otherwise = Nothing
+  where
+    _neighbors = neighbors field pos
+    flagCells  = filter isFlag  _neighbors
+    fieldCells = filter isField _neighbors
+openAroundOneCellIfMatchNumber _ _ = error "openPosIfMatchNumber: must be a number"
+-- pPrint $ openAroundOneCellIfMatchNumber (updateCell testField2 (Cell Flag (Position 1 0))) (cellAt testField2 (Position 1 1))
+
+validatePos :: CellField -> Cell -> Bool
+validatePos field (Cell (Number n) pos)
+  = length flagCells + length fieldCells >= n
+  where
+    _neighbors = neighbors field pos
+    flagCells  = filter isFlag  _neighbors
+    fieldCells = filter isField _neighbors
+
+data Result
+  = InvalidField CellField Position
+  | NoChange CellField
+  | UpdatedField CellField
+  deriving Show
+
+isUpdatedField (UpdatedField _) = True
+isUpdatedField _ = False
+
+openAroundCellIfMatchNumber :: CellField -> Cell -> Result
+openAroundCellIfMatchNumber field cell@(Cell (Number n) pos)
+  | not $ validatePos field cell = InvalidField field pos
+  | otherwise
+  = case openAroundOneCellIfMatchNumber field cell of
+      Nothing -> NoChange field
+      Just field'
+        -> foldl
+           visitNeighbor
+           (UpdatedField field')
+           (filter isNumber $ neighbors field' pos)
+  where
+    visitNeighbor r@(InvalidField _ _) _ = r
+    visitNeighbor (UpdatedField field) neighbor
+      = proceedUpdated field neighbor
+    visitNeighbor (NoChange field) neighbor
+      = proceedUpdated field neighbor
+    proceedUpdated field neighbor
+      = case openAroundCellIfMatchNumber field neighbor of
+          NoChange field -> UpdatedField field
+          UpdatedField field -> UpdatedField  field
+          r@(InvalidField _ _) -> r
+-- pPrint $ openAroundCellIfMatchNumber (updateCell testField2 (Cell Flag (Position 0 0))) (cellAt testField2 (Position 0 1))
+
+openAroundOneCellIfAllFlagOptionsMatchNumber field cell@(Cell (Number n) pos)
+  = map Model.pos
+  . filter isOpenUnknown
+  . join
+  . map (map head)
+  . filter ((==1) . length)
+  . map group
+  . transpose
+  . map (\(UpdatedField field) -> toList field)
+--  . map (\(UpdatedField field) -> neighbors field pos)
+  . filter isUpdatedField
+  . map (\field -> openAroundCellIfMatchNumber field cell)
+  . map (updateCells field)
+  $ flagableFieldCombinations field pos
+
+openAroundCellsIfAllFlagOptionsMatchNumber :: CellField -> [Position]
+openAroundCellsIfAllFlagOptionsMatchNumber field
+  = nub
+  . fold
+  . fmap (openAroundOneCellIfAllFlagOptionsMatchNumber field)
+  . filter isNumber
+  . toList
+  $ field
+
+testFieldTypes3
+  = mkField
+  [ [Field   , Field   , Field   , Field   , Field   ]
+  , [Number 1, Number 1, Number 1, Number 1, Number 1]
+  , [Open    , Open    , Open    , Open    , Open    ]
+  ]
+testField3 = Cell <$> testFieldTypes3 <*> positionsField 5 3
+
+testFieldTypes4
+  = mkField
+  [ [Field   , Number 1, Open    ]
+  , [Field   , Number 2, Number 1]
+  , [Field   , Flag    , Number 1]
+  , [Field   , Flag    , Number 1]
+  ]
+testField4 = Cell <$> testFieldTypes4 <*> positionsField 3 4
+
+testFieldTypes5
+  = mkField
+  [ [Field, Field   , Field   , Field   , Field]
+  , [Field, Number 1, Number 1, Number 2, Flag ]
+  , [Field, Number 2, Open    , Number 2, Field]
+  , [Flag , Number 2, Number 1, Number 1, Field]
+  , [Field, Field   , Field   , Field   , Field]
+  ]
+testField5 = Cell <$> testFieldTypes5 <*> positionsField 5 5
+-- openAroundCellsIfAllFlagOptionsMatchNumber testField5

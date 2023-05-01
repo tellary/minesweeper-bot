@@ -335,6 +335,10 @@ digAroundCell canvas fs pos = do
   moveToCell canvas fs pos
   withMouseDown (clickWith RightButton)
 
+openCell canvas fs pos = do
+  moveToCell canvas fs pos
+  clickWith LeftButton
+
 performOnCells
   :: Foldable t
   => (Element -> ImgFieldSize -> Position -> WD ())
@@ -350,6 +354,9 @@ markCells = performOnCells markCell
 
 digAroundCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
 digAroundCells = performOnCells digAroundCell
+
+openCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
+openCells = performOnCells openCell
 
 performMark :: GameField -> WD Bool
 performMark field = do
@@ -369,9 +376,18 @@ performDigAroundIfMatchNumber field = do
     digAroundCells (gameFieldSize field) (digIfMatchNumber (gameField field))
 -- runWD (fst r) (performDigAroundIfMatchNumber =<< readFieldFromScreen)
 
+performOpenAroundCellsIfAllFlagOptionsMatchNumber field
+  = openCells
+    (gameFieldSize field)
+    (openAroundCellsIfAllFlagOptionsMatchNumber (gameField field))
+
 play size = do
   field <- openField size
   continuePlay field
+
+performDig field = do
+  performOpenAroundCellsIfAllFlagOptionsMatchNumber field
+  --performDigAroundIfMatchNumber field
 
 continuePlay :: GameField -> WD ()
 continuePlay field = handle (
@@ -383,7 +399,7 @@ continuePlay field = handle (
   if marked
     then do
       field'' <- updateFieldFromScreen field'
-      performDigAroundIfMatchNumber field''
+      performDig field''
       continuePlay field''
     else do
       exitPlay field' 1
@@ -394,7 +410,7 @@ exitPlay _ 1000 = do
   return ()
 exitPlay field count = do
   field' <- updateFieldFromScreen field
-  performDigAroundIfMatchNumber field'
+  performDig field'
   field'' <- updateFieldFromScreen field'
   marked <- performMark field''
   if marked
