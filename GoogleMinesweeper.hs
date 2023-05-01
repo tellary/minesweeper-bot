@@ -57,6 +57,10 @@ data GameSize = Easy | Medium | Hard
 openGame :: GameSize -> WD DynamicImage
 openGame size = do
   openPage "https://www.google.com"
+  openGameFromSearch size
+
+openGameFromSearch :: GameSize -> WD DynamicImage
+openGameFromSearch size = do
   searchTextarea <- findElem (ByTag "textarea")
   sendKeys "minesweeper" searchTextarea
   sendKeys enter searchTextarea
@@ -311,6 +315,11 @@ readFieldFromScreenWithMsg = do
 
 openField :: GameSize -> WD GameField
 openField size = do
+  openPage "https://www.google.com"
+  openFieldFromSearch size
+
+openFieldFromSearch :: GameSize -> WD GameField
+openFieldFromSearch size = do
   screen <- openGame size
   let img = convertRGB8 screen
   let fs = readImgFieldSize img
@@ -439,4 +448,8 @@ exitPlay field count = do
 
 -- r <- returnSession remoteConfig (play Hard)
 -- r <- returnSession remoteConfig (openField Hard)
--- runWD (fst r) $ continuePlay (snd r)
+--
+-- r <- returnSession remoteConfig (return ())
+-- runWD (fst r) $ openPage "https://www.google.com"
+-- field <- runWD (fst r) $ openFieldFromSearch Hard
+-- runWD (fst r) $ continuePlay field
