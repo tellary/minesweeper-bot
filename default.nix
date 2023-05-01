@@ -5,7 +5,13 @@ with import
 runCommand "dummy" {
   buildInputs = [
     (haskell.packages.ghc927.ghcWithPackages
-      (pkgs: with pkgs; [ webdriver JuicyPixels-extra pretty-simple extra lens ])
+      (pkgs: with pkgs;
+        [ webdriver
+          JuicyPixels-extra
+          pretty-simple
+          extra
+          lens
+        ])
     )
   ];
 } ""

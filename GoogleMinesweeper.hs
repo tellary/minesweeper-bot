@@ -12,7 +12,7 @@ import           Control.Monad              (forM_)
 import           Control.Monad.Catch        (Exception, MonadThrow, handle,
                                              throwM)
 import           Control.Monad.Extra        (ifM)
-import           Control.Monad.IO.Class     (liftIO)
+import           Control.Monad.IO.Class     (MonadIO (liftIO))
 import           Control.Monad.Writer       (Writer, runWriter, tell, writer)
 import           Data.ByteString.Lazy       (ByteString, toStrict)
 import           Data.Foldable              (fold)
@@ -20,6 +20,7 @@ import           Data.Functor.Compose       (Compose (Compose), getCompose)
 import           Data.List                  (group, minimumBy, nub)
 import           Data.Ord                   (comparing)
 import           Data.Ratio                 (Ratio, denominator, numerator, (%))
+import           Data.Time
 import           Model                      (Cell (..), CellField,
                                              CellType (..), FieldSize (..),
                                              ImgFieldSize (..), Position (..),
@@ -28,12 +29,23 @@ import qualified Model
 import           Test.WebDriver
 import           Test.WebDriver.Common.Keys (enter)
 import           Test.WebDriver.Session
+import           Text.Printf                (printf)
 
 -- ./chromedriver --port=9515 --log-level=ALL --url-base=/wd/hub
 -- ./chromedriver --port=9515 --url-base=/wd/hub
 remoteConfig = useBrowser chrome defaultConfig { wdHost = "localhost"
                                                , wdPort = 9515
                                                }
+
+timeItNamed :: MonadIO m => String -> m a -> m a
+timeItNamed name a = do
+  start <- liftIO $ getCurrentTime
+  result <- a
+  stop <- liftIO $ getCurrentTime
+  let time :: Double
+        = realToFrac . nominalDiffTimeToSeconds $ diffUTCTime stop start
+  liftIO $ printf "%s: %6.2fs\n" name time
+  return result
 
 returnSession config wd = runSession config $ do
   sess <- getSession
@@ -75,8 +87,10 @@ takeFieldScreenshot = do
   (width, height) <- elemSize canvas
   liftIO (putStrLn $ "(width, height): " ++ show (width, height))
   bodyXY <- elemPos =<< findElem (ByTag "body")
-  img <- either undefined id . decodeImage . toStrict <$> screenshot
-  return
+  scr <- timeItNamed "screenshot" screenshot
+  img <- timeItNamed "decode screenshot" $ do
+    return . either undefined id . decodeImage . toStrict $ scr
+  timeItNamed "crop screenshot" . return
     $ dynamicPixelMap
       (crop
         (truncate (2 * x))
@@ -274,9 +288,10 @@ data GameField
   , gameField :: CellField
   }
 
-readField :: MonadThrow m => Image PixelRGB8 -> ImgFieldSize -> m CellField
+readField :: Image PixelRGB8 -> ImgFieldSize -> WD CellField
 readField img fs
-  =  mkField <$> (fromCellsWithMsgs $ readFieldWithMsgs img fs)
+  = timeItNamed "readField"
+    (mkField <$> (fromCellsWithMsgs $ readFieldWithMsgs img fs))
 
 readFieldFromScreen :: WD GameField
 readFieldFromScreen = do
@@ -285,7 +300,7 @@ readFieldFromScreen = do
   GameField img fs <$> readField img fs
 
 updateFieldFromScreen field = do
-  img <- convertRGB8 <$> takeFieldScreenshot
+  img <- timeItNamed "convertRGB8" (convertRGB8 <$> takeFieldScreenshot)
   cellField <- readField img (gameFieldSize field)
   return field { gameImage = img, gameField = cellField }
 
@@ -323,7 +338,6 @@ moveToCell canvas fs pos = do
         = ( fst centerCell `div` 2
           , snd centerCell `div` 2
           )
-  liftIO . putStrLn $ "moveToCell: " ++ show screenPos
   moveToFrom screenPos canvas
   
 markCell :: Element -> ImgFieldSize -> Position -> WD ()
@@ -350,17 +364,17 @@ performOnCells action fs cellPositions = do
   forM_ cellPositions (action canvas fs)
 
 markCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
-markCells = performOnCells markCell
+markCells fs  = timeItNamed "markCells" . performOnCells markCell fs
 
 digAroundCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
 digAroundCells = performOnCells digAroundCell
 
 openCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
-openCells = performOnCells openCell
+openCells fs = timeItNamed "openCells" . performOnCells openCell fs
 
 performMark :: GameField -> WD Bool
 performMark field = do
-  let cellsToMark = mark (gameField field)
+  cellsToMark <- timeItNamed "computeFlags" . return . mark $ (gameField field)
   markCells
     (gameFieldSize field)
     cellsToMark
@@ -377,9 +391,12 @@ performDigAroundIfMatchNumber field = do
 -- runWD (fst r) (performDigAroundIfMatchNumber =<< readFieldFromScreen)
 
 performOpenAroundCellsIfAllFlagOptionsMatchNumber field
-  = openCells
-    (gameFieldSize field)
-    (openAroundCellsIfAllFlagOptionsMatchNumber (gameField field))
+  = do
+      cells <- timeItNamed "compute openAroundCellsIfAllFlagOptionsMatchNumber"
+               . return $ openAroundCellsIfAllFlagOptionsMatchNumber (gameField field)
+      openCells
+        (gameFieldSize field)
+        cells
 
 play size = do
   field <- openField size
