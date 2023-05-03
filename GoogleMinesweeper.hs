@@ -3,33 +3,31 @@
 
 module GoogleMinesweeper where
 
-import           Bot
-import           Codec.Picture
-import           Codec.Picture.Extra        (crop)
-import           Control.Concurrent         (threadDelay)
-import           Control.DeepSeq            (rnf)
-import           Control.Monad              (forM_)
-import           Control.Monad.Catch        (Exception, MonadThrow, handle,
-                                             throwM)
-import           Control.Monad.Extra        (ifM)
-import           Control.Monad.IO.Class     (MonadIO (liftIO))
-import           Control.Monad.Writer       (Writer, runWriter, tell, writer)
-import           Data.ByteString.Lazy       (ByteString, toStrict)
-import           Data.Foldable              (fold)
-import           Data.Functor.Compose       (Compose (Compose), getCompose)
-import           Data.List                  (group, minimumBy, nub)
-import           Data.Ord                   (comparing)
-import           Data.Ratio                 (Ratio, denominator, numerator, (%))
-import           Data.Time
-import           Model                      (Cell (..), CellField,
-                                             CellType (..), FieldSize (..),
-                                             ImgFieldSize (..), Position (..),
-                                             mkField)
-import qualified Model
-import           Test.WebDriver
-import           Test.WebDriver.Common.Keys (enter)
-import           Test.WebDriver.Session
-import           Text.Printf                (printf)
+import Bot
+import Codec.Picture
+import Codec.Picture.Extra        (crop)
+import Control.Concurrent         (threadDelay)
+import Control.DeepSeq            (rnf)
+import Control.Monad              (forM_)
+import Control.Monad.Catch        (Exception, MonadThrow, handle, throwM)
+import Control.Monad.Extra        (ifM)
+import Control.Monad.IO.Class     (MonadIO (liftIO))
+import Control.Monad.Writer       (Writer, runWriter, tell, writer)
+import Data.ByteString.Lazy       (ByteString, toStrict)
+import Data.Foldable              (fold)
+import Data.Functor.Compose       (Compose (Compose), getCompose)
+import Data.List                  (group, minimumBy, nub)
+import Data.Ord                   (comparing)
+import Data.Ratio                 (Ratio, denominator, numerator, (%))
+import Data.Time
+import Field                      (Cell (..), CellField, CellType (..),
+                                   FieldSize (..), ImgFieldSize (..),
+                                   Position (..), mkField)
+import Game
+import Test.WebDriver
+import Test.WebDriver.Common.Keys (enter)
+import Test.WebDriver.Session
+import Text.Printf                (printf)
 
 -- ./chromedriver --port=9515 --log-level=ALL --url-base=/wd/hub
 -- ./chromedriver --port=9515 --url-base=/wd/hub
@@ -285,11 +283,11 @@ fromCellsWithMsgs cellsWithMsgs
          xs
     eitherMsgsOrCells = sequence es
 
-data GameField
-  = GameField
-  { gameImage :: Image PixelRGB8
-  , gameFieldSize :: ImgFieldSize
-  , gameField :: CellField
+data Screen
+  = Screen
+  { screenImage :: Image PixelRGB8
+  , screenFieldSize :: ImgFieldSize
+  , screenGame :: Game
   }
 
 readField :: Image PixelRGB8 -> ImgFieldSize -> WD CellField
@@ -297,33 +295,37 @@ readField img fs
   = timeItNamed "readField"
     (mkField <$> (fromCellsWithMsgs $ readFieldWithMsgs img fs))
 
-readFieldFromScreen :: WD GameField
-readFieldFromScreen = do
+readScreen :: WD Screen
+readScreen = do
   img <- convertRGB8 <$> takeFieldScreenshot
   let fs = readImgFieldSize img
-  GameField img fs <$> readField img fs
+  Screen img fs . Game undefined <$> readField img fs
 
-updateFieldFromScreen field = do
+updateScreen :: Screen -> WD Screen
+updateScreen screen = do
   img <- timeItNamed "convertRGB8" (convertRGB8 <$> takeFieldScreenshot)
-  cellField <- readField img (gameFieldSize field)
-  return field { gameImage = img, gameField = cellField }
+  cellField <- readField img (screenFieldSize screen)
+  return screen
+    { screenImage = img
+    , screenGame = (screenGame screen) { field = cellField }
+    }
 
-readFieldFromScreenWithMsg = do
+readScreenWithMsg = do
   img <- convertRGB8 <$> takeFieldScreenshot
   let fs = readImgFieldSize img
   return $ readFieldWithMsgs img fs
 
-openField :: GameSize -> WD GameField
+openField :: GameSize -> WD Screen
 openField size = do
   openPage "https://www.google.com"
   openFieldFromSearch size
 
-openFieldFromSearch :: GameSize -> WD GameField
+openFieldFromSearch :: GameSize -> WD Screen
 openFieldFromSearch size = do
   screen <- openGame size
   let img = convertRGB8 screen
   let fs = readImgFieldSize img
-  GameField img fs <$> readField img fs
+  Screen img fs . Game undefined <$> readField img fs
 
 openFieldWithMsgs size = do
   screen <- openGame size
@@ -335,7 +337,7 @@ openFieldWithMsgs size = do
 -- r <- returnSession remoteConfig (openField Medium)
 -- pPrintNoColor (map (map cellType) . snd $ r)
 -- pPrintNoColor . fromCellsWithMsgs $ snd r
--- pPrintNoColor =<< (runWD (fst r) $ (fmap cellType . gameField) <$> readFieldFromScreen)
+-- pPrintNoColor =<< (runWD (fst r) $ (fmap cellType . gameField) <$> readScreen)
 -- r <- returnSession remoteConfig (openFieldWithMsgs Hard)
 -- img <- runWD (fst r) (convertRGB8 <$> takeFieldScreenshot)
 
@@ -381,30 +383,36 @@ digAroundCells = performOnCells digAroundCell
 openCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
 openCells fs = timeItNamed "openCells" . performOnCells openCell fs
 
-performMark :: GameField -> WD Bool
-performMark field = do
-  cellsToMark <- timeItNamed "computeFlags" . return . mark $ (gameField field)
+performMark :: Screen -> WD Bool
+performMark screen = do
+  cellsToMark <-
+    timeItNamed "computeFlags"
+    . return . mark $ (field . screenGame $ screen)
   markCells
-    (gameFieldSize field)
+    (screenFieldSize screen)
     cellsToMark
   return . not . null $ cellsToMark
--- r <- returnSession remoteConfig (openField Medium)
+-- r <- returnSession remoteConfig (openScreen Medium)
 -- runWD (fst r) $ performMark (snd r)
--- runWD (fst r) (performMark =<< readFieldFromScreen)
+-- runWD (fst r) (performMark =<< readScreen)
 
-performDigAroundIfMatchNumber :: GameField -> WD ()
-performDigAroundIfMatchNumber field = do
-  rnf (gameField field)
+performDigAroundIfMatchNumber :: Screen -> WD ()
+performDigAroundIfMatchNumber screen = do
+  rnf (field . screenGame $ screen)
     `seq`
-    digAroundCells (gameFieldSize field) (digIfMatchNumber (gameField field))
--- runWD (fst r) (performDigAroundIfMatchNumber =<< readFieldFromScreen)
+    digAroundCells
+    (screenFieldSize screen)
+    (digIfMatchNumber (field . screenGame $ screen))
+-- runWD (fst r) (performDigAroundIfMatchNumber =<< readScreen)
 
-performOpenAroundCellsIfAllFlagOptionsMatchNumber field
+performOpenAroundCellsIfAllFlagOptionsMatchNumber screen
   = do
       cells <- timeItNamed "compute openAroundCellsIfAllFlagOptionsMatchNumber"
-               . return $ openAroundCellsIfAllFlagOptionsMatchNumber (gameField field)
+               . return
+               $ openAroundCellsIfAllFlagOptionsMatchNumber
+                 (field . screenGame $ screen)
       openCells
-        (gameFieldSize field)
+        (screenFieldSize screen)
         cells
 
 play size = do
@@ -415,29 +423,29 @@ performDig field = do
   performOpenAroundCellsIfAllFlagOptionsMatchNumber field
   --performDigAroundIfMatchNumber field
 
-continuePlay :: GameField -> WD ()
-continuePlay field = handle (
+continuePlay :: Screen -> WD ()
+continuePlay screen = handle (
   \(e :: ReadFieldException)
-  -> liftIO (putStrLn . show $ e) >> continuePlay field
+  -> liftIO (putStrLn . show $ e) >> continuePlay screen
   ) $ do
-  field' <- updateFieldFromScreen field
-  marked <- performMark field'
+  screen' <- updateScreen screen
+  marked <- performMark screen'
   if marked
     then do
-      field'' <- updateFieldFromScreen field'
-      performDig field''
-      continuePlay field''
+      screen'' <- updateScreen screen'
+      performDig screen''
+      continuePlay screen''
     else do
-      exitPlay field' 1
+      exitPlay screen' 1
 
-exitPlay :: GameField -> Int -> WD ()
+exitPlay :: Screen -> Int -> WD ()
 exitPlay _ 1000 = do
   liftIO $ putStrLn "Stopped playing"
   return ()
 exitPlay field count = do
-  field' <- updateFieldFromScreen field
+  field' <- updateScreen field
   performDig field'
-  field'' <- updateFieldFromScreen field'
+  field'' <- updateScreen field'
   marked <- performMark field''
   if marked
     then
@@ -448,6 +456,7 @@ exitPlay field count = do
 
 -- r <- returnSession remoteConfig (play Hard)
 -- r <- returnSession remoteConfig (openField Hard)
+-- runWD (fst r) $ continuePlay (snd r)
 --
 -- r <- returnSession remoteConfig (return ())
 -- runWD (fst r) $ openPage "https://www.google.com"

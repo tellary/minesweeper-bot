@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Model where
+module Field where
 
 import Control.Applicative
 import Control.DeepSeq

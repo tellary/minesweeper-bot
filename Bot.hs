@@ -5,7 +5,7 @@ module Bot where
 import Control.Monad (join)
 import Data.Foldable (fold, toList)
 import Data.List     (find, group, nub, transpose)
-import Model
+import Field
 
 neighbors field pos =
   [ fieldAt field (Position x' y')
@@ -26,7 +26,7 @@ markPosIfMatchNumber field pos
   = case cell of
       Cell (Number n) _
         | length flagCells + length fieldCells == n
-          -> map Model.pos fieldCells
+          -> map Field.pos fieldCells
       _ -> []
   where
     cell = cellAt field pos
@@ -144,7 +144,7 @@ markPosIfPossibleInAllCombinations field pos
     . filter ((==1) . length)
     . map group
     . transpose
-    . map (map Model.pos)
+    . map (map Field.pos)
     . filter (areFlagsPossibleOnAllNeighbors field pos)
     $ flagableFieldCombinations field pos
 
@@ -223,7 +223,7 @@ openAroundCellIfMatchNumber field cell@(Cell (Number n) pos)
 -- pPrint $ openAroundCellIfMatchNumber (updateCell testField2 (Cell Flag (Position 0 0))) (cellAt testField2 (Position 0 1))
 
 openAroundOneCellIfAllFlagOptionsMatchNumber field cell@(Cell (Number n) pos)
-  = map Model.pos
+  = map Field.pos
   . filter isOpenUnknown
   . join
   . map (map head)
