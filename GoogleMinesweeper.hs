@@ -324,10 +324,17 @@ openScreen size = do
 
 openScreenFromSearch :: GameSize -> WD Screen
 openScreenFromSearch size = do
-  screen <- openGame size
-  let img = convertRGB8 screen
-  let fs = readImgFieldSize img
-  Screen img fs . Game size (initialFlags size) <$> readField img fs
+  img <- openGameFromSearch size
+  let img8 = convertRGB8 img
+  let fs = readImgFieldSize img8
+  let buildScreen
+        = Screen img8 fs . Game size (initialFlags size) <$> readField img8 fs
+  let buildScreenLoop
+        = handle (
+        \(e :: ReadFieldException)
+        -> liftIO (putStrLn . show $ e) >> buildScreenLoop
+        ) $ buildScreen
+  buildScreenLoop
 
 openScreenWithMsgs size = do
   screen <- openGame size
@@ -452,19 +459,28 @@ restartPlay screen =
   continuePlay
     (screen & screenGame . flagsLeft .~ initialFlags (screen^.screenGame.size))
 
+performActions screen = do
+  let game = screen^.screenGame
+  let (actions, game') = runGame makeTurn game
+  let toMark = map position . filter isPerformMark $ actions
+  let toOpen = map position . filter isPerformOpen $ actions
+  markCells (screen^.screenFieldSize) toMark
+  openCells (screen^.screenFieldSize) toOpen
+  liftIO $ printf "flagsLeft: %d\n" (game'^.flagsLeft)
+  return (not . null $ toMark, screen & screenGame .~ game')
+
 continuePlay :: Screen -> WD ()
 continuePlay screen = handle (
   \(e :: ReadFieldException)
   -> liftIO (putStrLn . show $ e) >> continuePlay screen
   ) $ do
   screen' <- updateScreen screen
-  (marked, screen'') <- performMark screen'
+  (marked, screen'') <- performActions screen'
   if marked
     then do
-      screen''' <- updateScreen screen''
-      continuePlay =<< dig screen'''
+      continuePlay screen''
     else do
-      exitPlay screen' 1
+      exitPlay screen'' 1
 
 exitPlay :: Screen -> Int -> WD ()
 exitPlay _ 1000 = do
@@ -472,14 +488,13 @@ exitPlay _ 1000 = do
   return ()
 exitPlay screen count = do
   screen' <- updateScreen screen
-  screen'' <- updateScreen =<< dig screen'
-  (marked, screen''') <- performMark screen''
+  (marked, screen'') <- performActions screen'
   if marked
     then
-      continuePlay screen'''
+      continuePlay screen''
     else do
       liftIO . putStrLn $ "No flags set, count: " ++ show count
-      exitPlay screen''' (count + 1)
+      exitPlay screen'' (count + 1)
 
 -- r <- returnSession remoteConfig (play Hard)
 -- r <- returnSession remoteConfig (openScreen Hard)

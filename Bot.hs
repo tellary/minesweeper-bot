@@ -2,10 +2,12 @@
 
 module Bot where
 
-import Control.Lens  hiding (element)
-import Control.Monad (join)
-import Data.Foldable (fold, toList)
-import Data.List     (find, group, nub, transpose)
+import Control.Lens        hiding (element)
+import Control.Monad       (join)
+import Control.Monad.State
+import Data.Foldable       (fold, toList)
+import Data.List           (find, group, nub, transpose)
+import Data.Tuple          (swap)
 import Field
 import Game
 
@@ -163,6 +165,32 @@ mark game
     markPositions = nub
       $  markIfMatchNumber (game^.field)
       ++ markIfPossibleInAllCombinations (game^.field)
+
+data Action = PerformMark Position | PerformOpen Position
+
+isPerformMark (PerformMark _) = True
+isPerformMark _ = False
+
+isPerformOpen (PerformOpen _) = True
+isPerformOpen _ = False
+
+position (PerformMark ps) = ps
+position (PerformOpen ps) = ps
+
+makeTurn :: GM [Action]
+makeTurn = do
+  toMark <- state mark
+  modify (over field (flip updateCells (map (Cell Flag) toMark)))
+  toOpen1 <- gets (openAroundCellsIfAllFlagOptionsMatchNumber . view field)
+  toOpen2 <- gets openRemainingFields
+  modify
+    (\game ->
+       over
+       flagsLeft
+       (\left -> if left <= 0 then initialFlags (game^.size) else left)
+       game
+    )
+  return $ (map PerformMark toMark) ++ map PerformOpen (nub (toOpen1 ++ toOpen2))
 
 testFieldTypes2
   = mkField
