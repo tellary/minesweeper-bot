@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module GoogleMinesweeper where
 
@@ -8,6 +9,8 @@ import Codec.Picture
 import Codec.Picture.Extra        (crop)
 import Control.Concurrent         (threadDelay)
 import Control.DeepSeq            (rnf)
+import Control.Lens               hiding (element)
+import Control.Lens.TH
 import Control.Monad              (forM_)
 import Control.Monad.Catch        (Exception, MonadThrow, handle, throwM)
 import Control.Monad.Extra        (ifM)
@@ -49,8 +52,6 @@ returnSession config wd = runSession config $ do
   sess <- getSession
   a <- wd
   return (sess, a)
-
-data GameSize = Easy | Medium | Hard
 
 openGame :: GameSize -> WD DynamicImage
 openGame size = do
@@ -285,60 +286,61 @@ fromCellsWithMsgs cellsWithMsgs
 
 data Screen
   = Screen
-  { screenImage :: Image PixelRGB8
-  , screenFieldSize :: ImgFieldSize
-  , screenGame :: Game
+  { _screenImage :: Image PixelRGB8
+  , _screenFieldSize :: ImgFieldSize
+  , _screenGame :: Game
   }
+
+$(makeLenses ''Screen)
 
 readField :: Image PixelRGB8 -> ImgFieldSize -> WD CellField
 readField img fs
   = timeItNamed "readField"
     (mkField <$> (fromCellsWithMsgs $ readFieldWithMsgs img fs))
 
-readScreen :: WD Screen
-readScreen = do
+readScreen :: GameSize -> WD Screen
+readScreen size = do
   img <- convertRGB8 <$> takeFieldScreenshot
   let fs = readImgFieldSize img
-  Screen img fs . Game undefined <$> readField img fs
+  Screen img fs . Game size undefined <$> readField img fs
 
 updateScreen :: Screen -> WD Screen
 updateScreen screen = do
   img <- timeItNamed "convertRGB8" (convertRGB8 <$> takeFieldScreenshot)
-  cellField <- readField img (screenFieldSize screen)
-  return screen
-    { screenImage = img
-    , screenGame = (screenGame screen) { field = cellField }
-    }
+  cellField <- readField img (screen^.screenFieldSize)
+  return $ screen
+    & screenGame . field .~ cellField
+    & screenImage .~ img
 
 readScreenWithMsg = do
   img <- convertRGB8 <$> takeFieldScreenshot
   let fs = readImgFieldSize img
   return $ readFieldWithMsgs img fs
 
-openField :: GameSize -> WD Screen
-openField size = do
+openScreen :: GameSize -> WD Screen
+openScreen size = do
   openPage "https://www.google.com"
-  openFieldFromSearch size
+  openScreenFromSearch size
 
-openFieldFromSearch :: GameSize -> WD Screen
-openFieldFromSearch size = do
+openScreenFromSearch :: GameSize -> WD Screen
+openScreenFromSearch size = do
   screen <- openGame size
   let img = convertRGB8 screen
   let fs = readImgFieldSize img
-  Screen img fs . Game undefined <$> readField img fs
+  Screen img fs . Game size (initialFlags size) <$> readField img fs
 
-openFieldWithMsgs size = do
+openScreenWithMsgs size = do
   screen <- openGame size
   let img = convertRGB8 screen
   let fs = readImgFieldSize img
   return $ readFieldWithMsgs img fs
 
--- r <- returnSession remoteConfig (openFieldWithMsgs Easy)
--- r <- returnSession remoteConfig (openField Medium)
+-- r <- returnSession remoteConfig (openScreenWithMsgs Easy)
+-- r <- returnSession remoteConfig (openScreen Medium)
 -- pPrintNoColor (map (map cellType) . snd $ r)
 -- pPrintNoColor . fromCellsWithMsgs $ snd r
 -- pPrintNoColor =<< (runWD (fst r) $ (fmap cellType . gameField) <$> readScreen)
--- r <- returnSession remoteConfig (openFieldWithMsgs Hard)
+-- r <- returnSession remoteConfig (openScreenWithMsgs Hard)
 -- img <- runWD (fst r) (convertRGB8 <$> takeFieldScreenshot)
 
 moveToCell :: Element -> ImgFieldSize -> Position -> WD ()
@@ -354,6 +356,7 @@ moveToCell canvas fs pos = do
 markCell :: Element -> ImgFieldSize -> Position -> WD ()
 markCell canvas fs pos = do
   moveToCell canvas fs pos
+  liftIO (threadDelay (10*1000))
   clickWith RightButton
 
 digAroundCell canvas fs pos = do
@@ -383,45 +386,71 @@ digAroundCells = performOnCells digAroundCell
 openCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
 openCells fs = timeItNamed "openCells" . performOnCells openCell fs
 
-performMark :: Screen -> WD Bool
+performMark :: Screen -> WD (Bool, Screen)
 performMark screen = do
-  cellsToMark <-
+  (cellsToMark, game') <-
     timeItNamed "computeFlags"
-    . return . mark $ (field . screenGame $ screen)
+    . return . mark $ screen^.screenGame
   markCells
-    (screenFieldSize screen)
+    (screen^.screenFieldSize)
     cellsToMark
-  return . not . null $ cellsToMark
+  return
+    ( not . null $ cellsToMark
+    , screen & screenGame .~ game'
+    )
 -- r <- returnSession remoteConfig (openScreen Medium)
 -- runWD (fst r) $ performMark (snd r)
 -- runWD (fst r) (performMark =<< readScreen)
 
 performDigAroundIfMatchNumber :: Screen -> WD ()
 performDigAroundIfMatchNumber screen = do
-  rnf (field . screenGame $ screen)
+  rnf (screen^.screenGame.field)
     `seq`
     digAroundCells
-    (screenFieldSize screen)
-    (digIfMatchNumber (field . screenGame $ screen))
+    (screen^.screenFieldSize)
+    (digIfMatchNumber (screen^.screenGame.field))
 -- runWD (fst r) (performDigAroundIfMatchNumber =<< readScreen)
 
-performOpenAroundCellsIfAllFlagOptionsMatchNumber screen
-  = do
-      cells <- timeItNamed "compute openAroundCellsIfAllFlagOptionsMatchNumber"
-               . return
-               $ openAroundCellsIfAllFlagOptionsMatchNumber
-                 (field . screenGame $ screen)
-      openCells
-        (screenFieldSize screen)
-        cells
+performOpenAroundCellsIfAllFlagOptionsMatchNumber
+  :: Screen -> WD ()
+performOpenAroundCellsIfAllFlagOptionsMatchNumber screen = do
+  cells <- timeItNamed "compute openAroundCellsIfAllFlagOptionsMatchNumber"
+           . return
+           $ openAroundCellsIfAllFlagOptionsMatchNumber
+           (screen^.screenGame.field)
+  openCells
+    (screen^.screenFieldSize)
+    cells
 
+performOpenRemainingFields screen
+  = openCells
+    (screen^.screenFieldSize)
+    (openRemainingFields (screen^.screenGame))
+  
 play size = do
-  field <- openField size
+  field <- openScreen size
   continuePlay field
 
-performDig field = do
-  performOpenAroundCellsIfAllFlagOptionsMatchNumber field
+performDig :: Screen -> WD ()
+performDig screen = do
+  performOpenAroundCellsIfAllFlagOptionsMatchNumber screen
+  performOpenRemainingFields screen
   --performDigAroundIfMatchNumber field
+
+dig :: Screen -> WD Screen
+dig screen = do
+  liftIO $ printf "dig: flagsLeft: %d\n" (screen^.screenGame.flagsLeft)
+  performDig screen
+  if screen^.screenGame.flagsLeft <= 0
+    then return 
+         (screen
+           &  screenGame.flagsLeft
+              .~ initialFlags (screen^.screenGame.size))
+    else return screen
+
+restartPlay screen =
+  continuePlay
+    (screen & screenGame . flagsLeft .~ initialFlags (screen^.screenGame.size))
 
 continuePlay :: Screen -> WD ()
 continuePlay screen = handle (
@@ -429,12 +458,11 @@ continuePlay screen = handle (
   -> liftIO (putStrLn . show $ e) >> continuePlay screen
   ) $ do
   screen' <- updateScreen screen
-  marked <- performMark screen'
+  (marked, screen'') <- performMark screen'
   if marked
     then do
-      screen'' <- updateScreen screen'
-      performDig screen''
-      continuePlay screen''
+      screen''' <- updateScreen screen''
+      continuePlay =<< dig screen'''
     else do
       exitPlay screen' 1
 
@@ -442,23 +470,22 @@ exitPlay :: Screen -> Int -> WD ()
 exitPlay _ 1000 = do
   liftIO $ putStrLn "Stopped playing"
   return ()
-exitPlay field count = do
-  field' <- updateScreen field
-  performDig field'
-  field'' <- updateScreen field'
-  marked <- performMark field''
+exitPlay screen count = do
+  screen' <- updateScreen screen
+  screen'' <- updateScreen =<< dig screen'
+  (marked, screen''') <- performMark screen''
   if marked
     then
-      continuePlay field''
+      continuePlay screen'''
     else do
       liftIO . putStrLn $ "No flags set, count: " ++ show count
-      exitPlay field'' (count + 1)
+      exitPlay screen''' (count + 1)
 
 -- r <- returnSession remoteConfig (play Hard)
--- r <- returnSession remoteConfig (openField Hard)
--- runWD (fst r) $ continuePlay (snd r)
+-- r <- returnSession remoteConfig (openScreen Hard)
+-- runWD (fst r) $ restartPlay (snd r)
 --
 -- r <- returnSession remoteConfig (return ())
 -- runWD (fst r) $ openPage "https://www.google.com"
--- field <- runWD (fst r) $ openFieldFromSearch Hard
+-- field <- runWD (fst r) $ openScreenFromSearch Hard
 -- runWD (fst r) $ continuePlay field

@@ -2,7 +2,7 @@
 
 module Game where
 
-import Control.Lens hiding (element)
+import Control.Lens    hiding (element)
 import Control.Lens.TH
 import Field
 

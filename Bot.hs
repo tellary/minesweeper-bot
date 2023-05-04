@@ -2,10 +2,12 @@
 
 module Bot where
 
+import Control.Lens  hiding (element)
 import Control.Monad (join)
 import Data.Foldable (fold, toList)
 import Data.List     (find, group, nub, transpose)
 import Field
+import Game
 
 neighbors field pos =
   [ fieldAt field (Position x' y')
@@ -152,7 +154,15 @@ markIfPossibleInAllCombinations :: CellField -> [Position]
 markIfPossibleInAllCombinations field
   = fold . fmap (markPosIfPossibleInAllCombinations field . pos) $ field
 
-mark field = nub $ markIfMatchNumber field ++ markIfPossibleInAllCombinations field
+mark :: Game -> ([Position], Game)
+mark game
+  = ( markPositions
+    , game & flagsLeft .~ game^.flagsLeft - length markPositions
+    )
+  where
+    markPositions = nub
+      $  markIfMatchNumber (game^.field)
+      ++ markIfPossibleInAllCombinations (game^.field)
 
 testFieldTypes2
   = mkField
@@ -273,3 +283,8 @@ testFieldTypes5
   ]
 testField5 = Cell <$> testFieldTypes5 <*> positionsField 5 5
 -- openAroundCellsIfAllFlagOptionsMatchNumber testField5
+
+openRemainingFields :: Game -> [Position]
+openRemainingFields game
+  | game^.flagsLeft == 0 = map pos . filter isField . toList $ game^.field
+  | otherwise = []
