@@ -179,6 +179,12 @@ position (PerformOpen ps) = ps
 
 makeTurn :: GM [Action]
 makeTurn = do
+  modify
+    (\game ->
+       if (length . filter (not . isField) . toList $ game^.field) == 0
+       then game & flagsLeft .~ initialFlags (game^.size)
+       else game
+    )
   toMark <- state mark
   modify (over field (flip updateCells (map (Cell Flag) toMark)))
   toOpen1 <- gets (openAroundCellsIfAllFlagOptionsMatchNumber . view field)
