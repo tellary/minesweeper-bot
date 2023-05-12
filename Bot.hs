@@ -278,6 +278,9 @@ data Result
   | UpdatedField CellField
   deriving Show
 
+isNoChangeField (NoChange _) = True
+isNoChangeField _ = False
+
 isUpdatedField (UpdatedField _) = True
 isUpdatedField _ = False
 
@@ -401,12 +404,13 @@ solveCell depth visited cell@(Cell (Number _) pos)
       if (not $ validatePos field cell)
         then return $ InvalidField field pos
         else do
-          modify . over Game.field $ \field ->
-            case openAroundOneCellIfMatchNumber field cell of
-              Just field' -> field'
-              Nothing -> field
+          cellsOpened <- case openAroundOneCellIfMatchNumber field cell of
+              Just field' -> modify (set Game.field field') >> return True
+              Nothing -> return False
           flagableNeighborCombinationsGames cell >>= \case
-            [] -> return $ UpdatedField field
+            [] -> if cellsOpened
+                  then return $ UpdatedField field
+                  else return $ NoChange field
             combinationGames  -> do
               let allNeighborGames = concat . flip map combinationGames
                     $ \game ->
@@ -429,13 +433,16 @@ solveCell depth visited cell@(Cell (Number _) pos)
               if null allNeighborGames
                 then return $ InvalidField field pos
                 else
-                case filter isUpdatedField allNeighborGames of
-                  [] -> return $ UpdatedField field
+                case allNeighborGames of
+                  [] -> return $ NoChange field
                   updatedGames -> do
                     modify . over Game.field
                       $ \field -> mergeNeighbors pos field
                                   $ map
-                                  (\(UpdatedField field) -> field)
+                                  (\case
+                                      UpdatedField field -> field
+                                      NoChange field -> field
+                                  )
                                   updatedGames
                     UpdatedField . view Game.field <$> get
 solveCell _ _ _ = do
