@@ -6,22 +6,27 @@ module Field where
 import Control.Applicative
 import Control.DeepSeq
 import Control.Lens
-import Data.Functor.Classes (Show1)
+import Data.Functor.Classes (Eq1, Show1)
 import Data.Functor.Compose
+import Data.List            (find)
 import GHC.Generics         (Generic)
 
 data Cell
   = Cell { cellType :: CellType, pos :: Position }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Ord, Generic)
 data CellType
-  = Open | Number Int | Field | Flag | Mine | OpenUnknown
-  deriving (Eq, Show, Generic)
+  = Open | OpenUnknown | Number Int | Field | Flag | NewFlag | Mine 
+  deriving (Eq, Show, Ord, Generic)
 
 instance NFData CellType
 instance NFData Cell
 
 isFlag (Cell Flag _) = True
+isFlag (Cell NewFlag _) = True
 isFlag _ = False
+
+isNewFlag (Cell NewFlag _) = True
+isNewFlag _ = False
 
 isField (Cell Field _) = True
 isField _ = False
@@ -36,9 +41,19 @@ isOpen _ = False
 isOpenUnknown (Cell OpenUnknown _) = True
 isOpenUnknown _ = False
 
+toOpenUnknown cells
+  | all isOpen cells && (not . null $ find isOpenUnknown cells)
+  = map (\cell -> cell { cellType = OpenUnknown }) cells
+  | otherwise = cells
+
+toNewFlag cells
+  | all isFlag cells && (not . null $ find isNewFlag cells)
+  = map (\cell -> cell { cellType = NewFlag }) cells
+  | otherwise = cells
+
 data Position
   = Position { x :: Int , y :: Int }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Ord, Generic)
 
 instance NFData Position
 
@@ -46,6 +61,7 @@ newtype Field a
   = MkField (Compose ZipList ZipList a)
   deriving
     ( Show
+    , Eq
     , Functor
     , Applicative
     , Foldable
@@ -53,6 +69,7 @@ newtype Field a
     )
 
 deriving instance Show1 (ZipList)
+deriving instance Eq1 (ZipList)
 instance NFData a => NFData (Field a)
 
 mkField :: [[a]] -> Field a

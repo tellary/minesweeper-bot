@@ -385,13 +385,17 @@ performOnCells action fs cellPositions = do
   forM_ cellPositions (action canvas fs)
 
 markCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
-markCells fs  = timeItNamed "markCells" . performOnCells markCell fs
+markCells fs ps
+  = timeItNamed (printf "markCells (%d)" (length ps))
+  . performOnCells markCell fs $ ps
 
 digAroundCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
 digAroundCells = performOnCells digAroundCell
 
 openCells :: Foldable t => ImgFieldSize -> t Position -> WD ()
-openCells fs = timeItNamed "openCells" . performOnCells openCell fs
+openCells fs ps
+  = timeItNamed (printf "openCells (%d)" (length ps))
+  . performOnCells openCell fs $ ps
 
 performMark :: Screen -> WD (Bool, Screen)
 performMark screen = do
@@ -461,9 +465,7 @@ restartPlay screen =
 
 performActions screen = do
   let game = screen^.screenGame
-  let (actions, game') = runGame makeTurn game
-  let toMark = map position . filter isPerformMark $ actions
-  let toOpen = map position . filter isPerformOpen $ actions
+  let ((toMark, toOpen), game') = runGame solve2 game
   markCells (screen^.screenFieldSize) toMark
   openCells (screen^.screenFieldSize) toOpen
   liftIO $ printf "flagsLeft: %d\n" (game'^.flagsLeft)
