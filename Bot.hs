@@ -342,10 +342,12 @@ solveCell depth visited cell@(Cell (Number _) pos)
               Just field' -> modify (set Game.field field') >> return True
               Nothing -> return False
           flagableNeighborCombinationsGames cell >>= \case
-            [] -> if cellsOpened
-                  then return $ UpdatedField field
-                  else return $ NoChange field
-            combinationGames  -> do
+            [] -> do
+              field' <- use Game.field
+              if cellsOpened
+                then return $ UpdatedField field'
+                else return $ NoChange field'
+            combinationGames -> do
               let allNeighborGames = concat . flip map combinationGames
                     $ \game ->
                         let neighborNumbers
@@ -363,30 +365,34 @@ solveCell depth visited cell@(Cell (Number _) pos)
                                 neighborNumbers
                         in if null $ find isInvalidField neighborGames
                            then neighborGames
-                           else []
+                           else [] -- This game doesn't contribute,
+                                   -- because it's invalid for one of neighbors
               if null allNeighborGames
-                then return $ InvalidField field pos
-                else
-                case allNeighborGames of
-                  [] -> return $ NoChange field
-                  updatedGames -> do
-                    modify . over Game.field
-                      $ \field -> mergeNeighbors pos field
-                                  $ map
-                                  (\case
-                                      UpdatedField field -> field
-                                      NoChange field -> field
-                                  )
-                                  updatedGames
-                    UpdatedField . view Game.field <$> get
+                then (\field -> InvalidField field pos) <$> use Game.field
+                else do
+                  let (merged, mergedNeighborsField)
+                        = mergeNeighbors pos field
+                          $ map
+                            (\case
+                                UpdatedField field -> field
+                                NoChange field -> field
+                            )
+                            $ allNeighborGames
+                  if merged
+                    then do
+                      modify (set Game.field mergedNeighborsField)
+                      UpdatedField <$> use Game.field
+                    else if cellsOpened
+                         then UpdatedField <$> use Game.field
+                         else NoChange <$> use Game.field
 solveCell _ _ _ = do
   field <- use field
   return $ NoChange field
 -- let f = testField3 in flip evalGame (initialGame Easy f) (solveCell 5 [] . cellAt f $ Position 1 1)
 
-mergeNeighbors :: Position -> CellField -> [CellField] -> CellField
+mergeNeighbors :: Position -> CellField -> [CellField] -> (Bool, CellField)
 mergeNeighbors pos baseField fields
-  = Field.updateCells baseField sameOpenOrFlag
+  = (not . null $ sameOpenOrFlag, Field.updateCells baseField sameOpenOrFlag)
   where
     sameOpenOrFlag = filter (\cell -> isOpen cell || isFlag cell)
                    . join
