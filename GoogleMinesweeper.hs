@@ -305,7 +305,10 @@ readScreen size = do
   Screen img fs . Game size undefined <$> readField img fs
 
 updateScreen :: Screen -> WD Screen
-updateScreen screen = do
+updateScreen screen
+  = handle (\(e :: ReadFieldException) -> do
+               liftIO (putStrLn . show $ e)
+               updateScreen screen) $ do
   img <- timeItNamed "convertRGB8" (convertRGB8 <$> takeFieldScreenshot)
   cellField <- readField img (screen^.screenFieldSize)
   return $ screen
@@ -472,12 +475,9 @@ performActions screen = do
   return (not . null $ toMark, screen & screenGame .~ game')
 
 continuePlay :: Screen -> WD ()
-continuePlay screen = handle (
-  \(e :: ReadFieldException)
-  -> liftIO (putStrLn . show $ e) >> continuePlay screen
-  ) $ do
-  screen' <- updateScreen screen
-  (marked, screen'') <- performActions screen'
+continuePlay screen = do
+  (marked, screen') <- performActions screen
+  screen'' <- updateScreen screen'
   if marked
     then do
       continuePlay screen''
@@ -489,8 +489,8 @@ exitPlay _ 1000 = do
   liftIO $ putStrLn "Stopped playing"
   return ()
 exitPlay screen count = do
-  screen' <- updateScreen screen
-  (marked, screen'') <- performActions screen'
+  (marked, screen') <- performActions screen
+  screen'' <- updateScreen screen'
   if marked
     then
       continuePlay screen''
