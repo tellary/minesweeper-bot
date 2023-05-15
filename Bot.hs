@@ -410,20 +410,50 @@ fromUpdatedField (UpdatedField field) = field
 
 solveDepth = 10
 
-solve :: GM ([Position], [Position])
+solve :: GM (Bool, [Position], [Position])
 solve = do
-  mapM_ (solveCell solveDepth []) . toList . view Game.field =<< get
+  fieldBefore <- use field
+  cells <- cellsAffectedByUpdate <$> get
+  mapM_ (solveCell solveDepth []) cells
   openCells <- gets (filter isOpenUnknown . toList . view Game.field)
   let open = map Field.pos $ openCells
   markCells <- gets (filter isNewFlag . toList . view Game.field)
   let mark = map Field.pos $ markCells
   updateCells markCells
   updateCells openCells
-  return (mark, open)
+  modify $ set previous (Just fieldBefore)
+  return (not . null $ cells, mark, open)
 
-solve2 = do
-  solve
-  solve
---  solve
+changedCells game = case view previous $ game of
+  Nothing -> toList . view field $ game
+  Just previousField
+    -> map snd . filter (uncurry (/=))
+       $ zip
+         (toList previousField)
+         (toList . view Game.field $ game)
+
+cellsAffectedByUpdate game = case view previous $ game of
+  Nothing -> toList . view field $ game
+  Just _
+    -> concat
+       . map
+         (\cell -> filter isNumber
+                   . (cell :) . neighbors (view field game)
+                   . Field.pos $ cell
+         )
+       . changedCells
+       $ game
+    
+solve2 =
+  let loop =
+        do
+          r@(updated, mark, open) <- solve
+          if updated then loop
+            else return r
+  in do
+    (_, mark, open) <- loop
+    return (mark, open)
+
+
 
 

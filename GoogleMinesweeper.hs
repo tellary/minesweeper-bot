@@ -302,7 +302,7 @@ readScreen :: GameSize -> WD Screen
 readScreen size = do
   img <- convertRGB8 <$> takeFieldScreenshot
   let fs = readImgFieldSize img
-  Screen img fs . Game size undefined <$> readField img fs
+  Screen img fs . Game size Nothing undefined <$> readField img fs
 
 updateScreen :: Screen -> WD Screen
 updateScreen screen
@@ -331,7 +331,7 @@ openScreenFromSearch size = do
   let img8 = convertRGB8 img
   let fs = readImgFieldSize img8
   let buildScreen
-        = Screen img8 fs . Game size (initialFlags size) <$> readField img8 fs
+        = Screen img8 fs . Game size Nothing (initialFlags size) <$> readField img8 fs
   let buildScreenLoop
         = handle (
         \(e :: ReadFieldException)
