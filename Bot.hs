@@ -7,7 +7,8 @@ import           Control.Lens        hiding (element)
 import           Control.Monad       (join)
 import           Control.Monad.State
 import           Data.Foldable       (fold, toList)
-import           Data.List           (find, group, nub, transpose)
+import           Data.List           (find, group, transpose)
+import           Data.List.Extra     (nubOrd)
 import           Data.Tuple          (swap)
 import           Debug.Trace         (trace)
 import           Field               (Cell (..), CellField, CellType (..),
@@ -283,20 +284,32 @@ mergeNeighbors pos baseField fields
                    . map group
                    . map (toNewFlag)
                    . map (toOpenUnknown)
---                   . filter (isNeighbor pos . Field.pos . head)
+                   . filter (isNeighbor pos . Field.pos . head)
                    . transpose
                    . map toList
                    $ fields
 
 fromUpdatedField (UpdatedField field) = field
 
-solveDepth = 10
+solveDepth = 5
 
 solve :: GM (Bool, [Position], [Position])
 solve = do
   fieldBefore <- use field
+  let loop _        [] = return ()
+      loop visited (cell:cells) = do
+        result <- solveCell solveDepth [] cell
+        if isUpdatedField result
+          then do
+            field' <- use field
+            let cells' = filter (not . (`elem` visited))
+                         . filter isNumber
+                         . neighbors field'
+                         . pos $ cell
+            loop (cell:visited) (nubOrd $ cells' ++ cells)
+          else loop visited cells
   cells <- cellsAffectedByUpdate <$> get
-  mapM_ (solveCell solveDepth []) cells
+  loop [] cells
   openCells <- gets (filter isOpenUnknown . toList . view Game.field)
   let open = map Field.pos $ openCells
   markCells <- gets (filter isNewFlag . toList . view Game.field)
