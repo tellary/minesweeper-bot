@@ -45,43 +45,6 @@ neighbors field pos =
 -- neighbors f (Position 2 2) == [5,8,6]
 -- neighbors f (Position 1 1) [1,4,7,2,8,3,6,9]
 
-markPosIfMatchNumber :: CellField -> Position -> [Position]
-markPosIfMatchNumber field pos
-  = case cell of
-      Cell (Number n) _
-        | length flagCells + length fieldCells == n
-          -> map Field.pos fieldCells
-      _ -> []
-  where
-    cell = cellAt field pos
-    flagCells  = filter isFlag  (neighbors field pos)
-    fieldCells = filter isField (neighbors field pos)
-
-digPosIfMatchNumber :: CellField -> Position -> Bool
-digPosIfMatchNumber field pos
-  = case cell of
-      Cell (Number n) _ -> length flagCells == n && not (null fieldCells)
-      _ -> False
-  where
-    cell = cellAt field pos
-    flagCells  = filter isFlag  (neighbors field pos)
-    fieldCells = filter isField (neighbors field pos)
-
-markIfMatchNumber :: CellField -> [Position]
-markIfMatchNumber field
-  = fold . fmap (markPosIfMatchNumber field . pos) $ field
-
-digIfMatchNumber :: CellField -> [Position]
-digIfMatchNumber field
-  = filter (digPosIfMatchNumber field) . map pos . toList $ field
--- :l Bot GoogleMinesweeper
--- import GoogleMinesweeper
--- r <- returnSession remoteConfig (openField Easy)
--- markIfMatchNumber (snd r) (Position 0 0)
--- import Test.WebDriver
--- f <- runWD (fst r) readFieldFromScreen
--- markIfMatchNumber f (Position 0 0)
-
 type NumItems = Int
 type NumPositions = Int
 
@@ -123,57 +86,6 @@ flagableNeighborCombinations field pos
             = map (map fst . filter snd . zip _neighbors) _combinations
       _ -> []
 
-
-
-overrideCells = overrideCellsIf (const True)
-overrideCellsIf p override cells = do
-  cell <- cells
-  let overrideMaybe = find (\cell' -> pos cell == pos cell') override
-  return $ maybe cell (\cell' -> if p cell' then cell' else cell) overrideMaybe
--- pPrint $ overrideCells (flagableNeighborCombinations testField1 (Position 1 1) !! 1) (neighbors testField1 (Position 2 1))
-
-areFlagsPossibleOnCell field flags (Cell (Number n) pos)
-  = _newNumberOfFlags <= n
-  where
-    _neighbors = neighbors field pos
-    _overrideCells = overrideCells flags _neighbors
-    _newNumberOfFlags = length . filter isFlag $ _overrideCells
-areFlagsPossibleOnCell _ _ _ = error "areFlagsPossibleOnCell: must be number"
--- areFlagsPossibleOnCell testField1 (flagableNeighborCombinations testField1 (Position 1 1) !! 1) (cellAt testField1 (Position 2 1))
--- areFlagsPossibleOnCell testField1 (flagableNeighborCombinations testField1 (Position 1 1) !! 5) (cellAt testField1 (Position 2 1))
-
-areFlagsPossibleOnAllNeighbors field pos flags
-  = all _flagsPossibleOnNeighbor _numbers
-  where
-    _neighbors = neighbors field pos
-    _numbers = filter isNumber _neighbors
-    _flagsPossibleOnNeighbor = areFlagsPossibleOnCell field flags
--- pPrint $ filter (areFlagsPossibleOnAllNeighbors testField1 (Position 1 1)) $ flagableNeighborCombinations testField1 (Position 1 1)
-
-markPosIfPossibleInAllCombinations field pos
-  = join
-    . map (map head)
-    . filter ((==1) . length)
-    . map group
-    . transpose
-    . map (map Field.pos)
-    . filter (areFlagsPossibleOnAllNeighbors field pos)
-    $ flagableNeighborCombinations field pos
-
-markIfPossibleInAllCombinations :: CellField -> [Position]
-markIfPossibleInAllCombinations field
-  = fold . fmap (markPosIfPossibleInAllCombinations field . pos) $ field
-
-mark :: Game -> ([Position], Game)
-mark game
-  = ( markPositions
-    , game & flagsLeft .~ game^.flagsLeft - length markPositions
-    )
-  where
-    markPositions = nub
-      $  markIfMatchNumber (game^.field)
-      ++ markIfPossibleInAllCombinations (game^.field)
-
 data Action = PerformMark Position | PerformOpen Position
 
 isPerformMark (PerformMark _) = True
@@ -184,27 +96,6 @@ isPerformOpen _ = False
 
 position (PerformMark ps) = ps
 position (PerformOpen ps) = ps
-
-makeTurn :: GM [Action]
-makeTurn = do
-  modify
-    (\game ->
-       if (length . filter (not . isField) . toList $ game^.field) == 0
-       then game & flagsLeft .~ initialFlags (game^.size)
-       else game
-    )
-  toMark <- state mark
-  modify (over field (flip Field.updateCells (map (Cell Flag) toMark)))
-  toOpen1 <- gets (openAroundCellsIfAllFlagOptionsMatchNumber . view field)
-  toOpen2 <- gets openRemainingFields
-  modify
-    (\game ->
-       over
-       flagsLeft
-       (\left -> if left <= 0 then initialFlags (game^.size) else left)
-       game
-    )
-  return $ (map PerformMark toMark) ++ map PerformOpen (nub (toOpen1 ++ toOpen2))
 
 -- | Opens all fields around a cell if number of flags and fields is equal to
 -- the cell's own number
@@ -286,15 +177,6 @@ openAroundOneCellIfAllFlagOptionsMatchNumber field cell@(Cell (Number n) pos)
   . map (\field -> openAroundCellIfMatchNumber field cell)
   . map (Field.updateCells field)
   $ flagableNeighborCombinations field pos
-
-openAroundCellsIfAllFlagOptionsMatchNumber :: CellField -> [Position]
-openAroundCellsIfAllFlagOptionsMatchNumber field
-  = nub
-  . fold
-  . fmap (openAroundOneCellIfAllFlagOptionsMatchNumber field)
-  . filter isNumber
-  . toList
-  $ field
 
 openRemainingFields :: Game -> [Position]
 openRemainingFields game
@@ -453,7 +335,3 @@ solve2 =
   in do
     (_, mark, open) <- loop
     return (mark, open)
-
-
-
-

@@ -400,42 +400,6 @@ openCells fs ps
   = timeItNamed (printf "openCells (%d)" (length ps))
   . performOnCells openCell fs $ ps
 
-performMark :: Screen -> WD (Bool, Screen)
-performMark screen = do
-  (cellsToMark, game') <-
-    timeItNamed "computeFlags"
-    . return . mark $ screen^.screenGame
-  markCells
-    (screen^.screenFieldSize)
-    cellsToMark
-  return
-    ( not . null $ cellsToMark
-    , screen & screenGame .~ game'
-    )
--- r <- returnSession remoteConfig (openScreen Medium)
--- runWD (fst r) $ performMark (snd r)
--- runWD (fst r) (performMark =<< readScreen)
-
-performDigAroundIfMatchNumber :: Screen -> WD ()
-performDigAroundIfMatchNumber screen = do
-  rnf (screen^.screenGame.field)
-    `seq`
-    digAroundCells
-    (screen^.screenFieldSize)
-    (digIfMatchNumber (screen^.screenGame.field))
--- runWD (fst r) (performDigAroundIfMatchNumber =<< readScreen)
-
-performOpenAroundCellsIfAllFlagOptionsMatchNumber
-  :: Screen -> WD ()
-performOpenAroundCellsIfAllFlagOptionsMatchNumber screen = do
-  cells <- timeItNamed "compute openAroundCellsIfAllFlagOptionsMatchNumber"
-           . return
-           $ openAroundCellsIfAllFlagOptionsMatchNumber
-           (screen^.screenGame.field)
-  openCells
-    (screen^.screenFieldSize)
-    cells
-
 performOpenRemainingFields screen
   = openCells
     (screen^.screenFieldSize)
@@ -444,23 +408,6 @@ performOpenRemainingFields screen
 play size = do
   field <- openScreen size
   continuePlay field
-
-performDig :: Screen -> WD ()
-performDig screen = do
-  performOpenAroundCellsIfAllFlagOptionsMatchNumber screen
-  performOpenRemainingFields screen
-  --performDigAroundIfMatchNumber field
-
-dig :: Screen -> WD Screen
-dig screen = do
-  liftIO $ printf "dig: flagsLeft: %d\n" (screen^.screenGame.flagsLeft)
-  performDig screen
-  if screen^.screenGame.flagsLeft <= 0
-    then return 
-         (screen
-           &  screenGame.flagsLeft
-              .~ initialFlags (screen^.screenGame.size))
-    else return screen
 
 restartPlay screen =
   continuePlay
