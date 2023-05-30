@@ -69,8 +69,6 @@ openGameFromSearch size = do
 
   canvas <- findElem (ByTag "canvas")
   click canvas
-  -- wait 1 second to allow visual effects to pass
-  liftIO (threadDelay (1*1000*1000))
   takeFieldScreenshot
   
 selectSize Medium = return ()
@@ -82,6 +80,9 @@ selectSize size = do
 
 takeFieldScreenshot :: WD (DynamicImage, Int)
 takeFieldScreenshot = do
+  -- Allow time to debris to fly over cells to avoid mistaking a
+  -- flag for an empty field
+  liftIO (threadDelay (1000*1000))
   moveToFrom (0, 0) =<< findElem (ByTag "body")
   canvas <- findElem (ByTag "canvas")
   (x, y) <- elemPos canvas
@@ -372,7 +373,6 @@ moveToCell canvas fs pos = do
 markCell :: Element -> ImgFieldSize -> Position -> WD ()
 markCell canvas fs pos = do
   moveToCell canvas fs pos
-  liftIO (threadDelay (10*1000))
   clickWith RightButton
 
 digAroundCell canvas fs pos = do
