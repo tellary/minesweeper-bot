@@ -68,21 +68,25 @@ neighborsCombinations field pos n
 -- f = mkField [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 -- neighborsCombinations f (Position 0 0) 2 == [[4,2],[4,5],[2,5]]
 
-flagableNeighborCombinations :: CellField -> Position -> [[Cell]]
-flagableNeighborCombinations field pos
-  = case cellAt field pos of
-      (Cell (Number n) _)
-        -> map (map (\cell -> cell { cellType = NewFlag }))
-           . filter (null . find (not . isField))
-           $ _neighborCombinations
-        where
-          _neighbors = neighbors field pos
-          _flagCells  = length $ filter isFlag _neighbors
-          _combinations = combinations (n - _flagCells) (length _neighbors)
-          -- neighbors choosen in each combination
-          _neighborCombinations
-            = map (map fst . filter snd . zip _neighbors) _combinations
-      _ -> []
+flagableNeighborCombinations :: Position -> GM [[Cell]]
+flagableNeighborCombinations pos = do
+  field <- use field
+  flagsLeft <- use flagsLeft
+  case cellAt field pos of
+    (Cell (Number n) _)
+      -> return
+         . map (map (\cell -> cell { cellType = NewFlag }))
+         . filter (null . find (not . isField))
+         $ _neighborCombinations
+      where
+        _neighbors = neighbors field pos
+        _flagCellsNum  = length $ filter isFlag _neighbors
+        _newFlagsNum = min (n - _flagCellsNum) flagsLeft
+        _combinations = combinations _newFlagsNum (length _neighbors)
+        -- neighbors choosen in each combination
+        _neighborCombinations
+          = map (map fst . filter snd . zip _neighbors) _combinations
+    _ -> return []
 
 data Action = PerformMark Position | PerformOpen Position
 
@@ -113,9 +117,13 @@ openAroundOneCellIfMatchNumber _
   = error "openAroundOneCellIfMatchNumber: must be a number"
 -- pPrint $ openAroundOneCellIfMatchNumber (updateCell testField2 (Cell Flag (Position 1 0))) (cellAt testField2 (Position 1 1))
 
-validatePos :: CellField -> Cell -> Bool
-validatePos field (Cell (Number n) pos)
-  = length fieldCells >= n - length flagCells && length flagCells <= n
+validatePos :: Int -> CellField -> Cell -> Bool
+validatePos flagsLeft field (Cell (Number n) pos)
+  | length fieldCells < n - length flagCells = False
+  | length flagCells > n = False
+  | flagsLeft < n - length flagCells
+  = trace "validatePos: not enough flags left" $ False
+  | otherwise = True
   where
     _neighbors = neighbors field pos
     flagCells  = filter isFlag  _neighbors
@@ -150,9 +158,7 @@ openRemainingFields = get >>= \case
 -- opened and marked.
 flagableNeighborCombinationsGames :: Cell -> GM [Game]
 flagableNeighborCombinationsGames cell = do
-  field0 <- use Game.field
-  let flagCombinations = flagableNeighborCombinations field0 (pos cell)
-  -- trace (printf "cell: %s, flagsCombinations: %s" (show cell) (show flagCombinations)) $ 
+  flagCombinations <- flagableNeighborCombinations (pos cell)
   forM flagCombinations $ \flags -> do
     game <- get
     return . flip execGame game $ do
@@ -168,7 +174,8 @@ solveCell depth visited cell@(Cell (Number _) pos)
   | cell `elem` visited = use field >>= return . NoChange
   | otherwise = do
       field <- use field
-      if (not $ validatePos field cell)
+      flagsLeft <- use flagsLeft
+      if (not $ validatePos flagsLeft field cell)
         then return $ InvalidField field pos
         else do
           cellsOpened <- openAroundOneCellIfMatchNumber cell
