@@ -1,0 +1,6 @@
+*.dyn
+*.dyn_hi
+*.dyn_o
+*.o
+*.hi
+/GoogleMinesweeper
