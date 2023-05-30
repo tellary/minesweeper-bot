@@ -144,6 +144,10 @@ isUpdatedField _ = False
 isInvalidField (InvalidField _ _) = True
 isInvalidField _ = False
 
+resultType (InvalidField _ _) = "invalid"
+resultType (NoChange _) = "no change"
+resultType (UpdatedField _) = "updated"
+
 openRemainingFields :: GM ()
 openRemainingFields = get >>= \case
   game | view flagsLeft game == 0 -> updateCells opened
@@ -242,9 +246,7 @@ mergeNeighbors pos fields = do
                    . map toList
                    $ fields
 
-fromUpdatedField (UpdatedField field) = field
-
-solveDepth = 5
+solveDepth = 5000
 
 solve :: GM (Bool, [Position], [Position])
 solve = do
