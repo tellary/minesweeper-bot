@@ -115,7 +115,12 @@ updateCell field cell@(Cell _ pos)
   = updateAt field pos cell
 
 updateCells field cells
-  = foldl updateCell field cells
+  = foldl updateCountNewFlags (field, 0) cells
+  where
+    updateCountNewFlags (field, countOpen) cell
+      | isFlag . cellAt field . pos $ cell = (updateCell field cell, countOpen)
+      | isFlag cell = (updateCell field cell, countOpen + 1)
+      | otherwise = (updateCell field cell, countOpen)
 
 data ImgFieldSize
   = ImgFieldSize

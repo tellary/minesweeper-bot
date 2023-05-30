@@ -37,5 +37,10 @@ execGame :: GM a -> Game -> Game
 execGame (GM st) game = execState st game
 
 updateCells :: Foldable t => t Field.Cell -> GM ()
-updateCells cells
-  = modify . over field $ \field -> Field.updateCells field cells
+updateCells cells = do
+  field0 <- use field
+  let (field1, newFlags) = Field.updateCells field0 cells
+  modify $ \game ->
+    set flagsLeft ((view flagsLeft game) - newFlags)
+    . set field field1
+    $ game

@@ -2,8 +2,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module GoogleMinesweeper where
-
 import Bot
 import Codec.Picture
 import Codec.Picture.Extra        (crop)
@@ -22,6 +20,7 @@ import Data.Functor.Compose       (Compose (Compose), getCompose)
 import Data.List                  (group, minimumBy, nub)
 import Data.Ord                   (comparing)
 import Data.Ratio                 (Ratio, denominator, numerator, (%))
+import Data.Text                  (unpack)
 import Data.Time
 import Field                      (Cell (..), CellField, CellType (..),
                                    FieldSize (..), ImgFieldSize (..),
@@ -53,12 +52,12 @@ returnSession config wd = runSession config $ do
   a <- wd
   return (sess, a)
 
-openGame :: GameSize -> WD DynamicImage
+openGame :: GameSize -> WD (DynamicImage, Int)
 openGame size = do
   openPage "https://www.google.com"
   openGameFromSearch size
 
-openGameFromSearch :: GameSize -> WD DynamicImage
+openGameFromSearch :: GameSize -> WD (DynamicImage, Int)
 openGameFromSearch size = do
   searchTextarea <- findElem (ByTag "textarea")
   sendKeys "minesweeper" searchTextarea
@@ -73,7 +72,7 @@ openGameFromSearch size = do
   -- wait 1 second to allow visual effects to pass
   liftIO (threadDelay (1*1000*1000))
   takeFieldScreenshot
-
+  
 selectSize Medium = return ()
 selectSize size = do
   click =<< findElem (ByTag "g-dropdown-menu")
@@ -81,7 +80,7 @@ selectSize size = do
     Easy -> click =<< findElem (ByXPath "//div[text() = 'Easy']")
     Hard -> click =<< findElem (ByXPath "//div[text() = 'Hard']")
 
-takeFieldScreenshot :: WD DynamicImage
+takeFieldScreenshot :: WD (DynamicImage, Int)
 takeFieldScreenshot = do
   moveToFrom (0, 0) =<< findElem (ByTag "body")
   canvas <- findElem (ByTag "canvas")
@@ -93,7 +92,7 @@ takeFieldScreenshot = do
   scr <- timeItNamed "screenshot" screenshot
   img <- timeItNamed "decode screenshot" $ do
     return . either undefined id . decodeImage . toStrict $ scr
-  timeItNamed "crop screenshot" . return
+  cropped <- timeItNamed "crop screenshot" . return
     $ dynamicPixelMap
       (crop
         (truncate (2 * x))
@@ -102,6 +101,9 @@ takeFieldScreenshot = do
         (truncate (2 * height))
       )
       img
+  flagsAndTime <- findElem (ByXPath "//img[contains(@src, 'flag_icon.png')]/..")
+  flags <- getText =<< findElemFrom flagsAndTime (ByTag "div")
+  return (cropped, read . unpack $ flags)
 
 readImgFieldSize :: Pixel a => Image a -> ImgFieldSize
 readImgFieldSize img
@@ -300,23 +302,27 @@ readField img fs
 
 readScreen :: GameSize -> WD Screen
 readScreen size = do
-  img <- convertRGB8 <$> takeFieldScreenshot
+  (dynImg, flags) <- takeFieldScreenshot
+  let img = convertRGB8 dynImg
   let fs = readImgFieldSize img
-  Screen img fs . Game size Nothing undefined <$> readField img fs
+  Screen img fs . Game size Nothing flags <$> readField img fs
 
 updateScreen :: Screen -> WD Screen
 updateScreen screen
   = handle (\(e :: ReadFieldException) -> do
                liftIO (putStrLn . show $ e)
                updateScreen screen) $ do
-  img <- timeItNamed "convertRGB8" (convertRGB8 <$> takeFieldScreenshot)
+  (dynImg, flags) <- takeFieldScreenshot
+  let img = convertRGB8 dynImg
   cellField <- readField img (screen^.screenFieldSize)
   return $ screen
     & screenGame . field .~ cellField
     & screenImage .~ img
+    & screenGame . flagsLeft .~ flags
 
 readScreenWithMsg = do
-  img <- convertRGB8 <$> takeFieldScreenshot
+  (dynImg, flags) <- takeFieldScreenshot
+  let img = convertRGB8 dynImg
   let fs = readImgFieldSize img
   return $ readFieldWithMsgs img fs
 
@@ -327,11 +333,11 @@ openScreen size = do
 
 openScreenFromSearch :: GameSize -> WD Screen
 openScreenFromSearch size = do
-  img <- openGameFromSearch size
-  let img8 = convertRGB8 img
+  (dynImg, flags) <- openGameFromSearch size
+  let img8 = convertRGB8 dynImg
   let fs = readImgFieldSize img8
   let buildScreen
-        = Screen img8 fs . Game size Nothing (initialFlags size) <$> readField img8 fs
+        = Screen img8 fs . Game size Nothing flags <$> readField img8 fs
   let buildScreenLoop
         = handle (
         \(e :: ReadFieldException)
@@ -340,8 +346,8 @@ openScreenFromSearch size = do
   buildScreenLoop
 
 openScreenWithMsgs size = do
-  screen <- openGame size
-  let img = convertRGB8 screen
+  (dynImg, flags) <- openGame size
+  let img = convertRGB8 dynImg
   let fs = readImgFieldSize img
   return $ readFieldWithMsgs img fs
 
@@ -400,11 +406,6 @@ openCells fs ps
   = timeItNamed (printf "openCells (%d)" (length ps))
   . performOnCells openCell fs $ ps
 
-performOpenRemainingFields screen
-  = openCells
-    (screen^.screenFieldSize)
-    (openRemainingFields (screen^.screenGame))
-  
 play size = do
   field <- openScreen size
   continuePlay field
@@ -453,3 +454,5 @@ exitPlay screen count = do
 -- runWD (fst r) $ openPage "https://www.google.com"
 -- field <- runWD (fst r) $ openScreenFromSearch Hard
 -- runWD (fst r) $ continuePlay field
+
+main = returnSession remoteConfig (play Hard)

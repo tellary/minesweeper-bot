@@ -3,23 +3,20 @@
 
 module Bot where
 
-import           Control.Lens        hiding (element)
-import           Control.Monad       (join)
-import           Control.Monad.State
-import           Data.Foldable       (fold, toList)
-import           Data.List           (find, group, transpose)
-import           Data.List.Extra     (nubOrd)
-import           Data.Tuple          (swap)
-import           Debug.Trace         (trace)
-import           Field               (Cell (..), CellField, CellType (..),
-                                      FieldSize (..), Position (..), cellAt,
-                                      fieldAt, fieldSize, isField, isFlag,
-                                      isNewFlag, isNumber, isOpen,
-                                      isOpenUnknown, mkField, toNewFlag,
-                                      toOpenUnknown)
-import qualified Field
-import           Game
-import           Text.Printf         (printf)
+import Control.Lens        hiding (element)
+import Control.Monad       (join)
+import Control.Monad.State
+import Data.Foldable       (fold, toList)
+import Data.List           (find, group, transpose)
+import Data.List.Extra     (nubOrd)
+import Data.Tuple          (swap)
+import Debug.Trace         (trace)
+import Field               (Cell (..), CellField, CellType (..), FieldSize (..),
+                            Position (..), cellAt, fieldAt, fieldSize, isField,
+                            isFlag, isNewFlag, isNumber, isOpen, isOpenUnknown,
+                            mkField, toNewFlag, toOpenUnknown)
+import Game
+import Text.Printf         (printf)
 
 neighborPositions pos =
   [ Position x' y'
@@ -100,21 +97,19 @@ position (PerformOpen ps) = ps
 
 -- | Opens all fields around a cell if number of flags and fields is equal to
 -- the cell's own number
-openAroundOneCellIfMatchNumber :: CellField -> Cell -> Maybe CellField
-openAroundOneCellIfMatchNumber field (Cell (Number n) pos)
-  | length flagCells == n && length fieldCells > 0
-  = Just $ foldl
-    (\field fieldCell
-      -> Field.updateCell field fieldCell { cellType = OpenUnknown }
-    )
-    field
-    fieldCells
-  | otherwise = Nothing
-  where
-    _neighbors = neighbors field pos
-    flagCells  = filter isFlag  _neighbors
-    fieldCells = filter isField _neighbors
-openAroundOneCellIfMatchNumber _ _
+openAroundOneCellIfMatchNumber :: Cell -> GM Bool
+openAroundOneCellIfMatchNumber (Cell (Number n) pos) = use field >>= \case
+  field | length flagCells == n && length fieldCells > 0 -> do
+            updateCells
+              . map (\cell -> cell { cellType = OpenUnknown })
+              $ fieldCells
+            return True
+        | otherwise -> return False
+    where
+      _neighbors = neighbors field pos
+      flagCells  = filter isFlag  _neighbors
+      fieldCells = filter isField _neighbors
+openAroundOneCellIfMatchNumber _
   = error "openAroundOneCellIfMatchNumber: must be a number"
 -- pPrint $ openAroundOneCellIfMatchNumber (updateCell testField2 (Cell Flag (Position 1 0))) (cellAt testField2 (Position 1 1))
 
@@ -141,48 +136,15 @@ isUpdatedField _ = False
 isInvalidField (InvalidField _ _) = True
 isInvalidField _ = False
 
-openAroundCellIfMatchNumber :: CellField -> Cell -> Result
-openAroundCellIfMatchNumber field cell@(Cell (Number n) pos)
-  | not $ validatePos field cell = InvalidField field pos
-  | otherwise
-  = case openAroundOneCellIfMatchNumber field cell of
-      Nothing -> NoChange field
-      Just field'
-        -> foldl
-           visitNeighbor
-           (UpdatedField field')
-           (filter isNumber $ neighbors field' pos)
-  where
-    visitNeighbor r@(InvalidField _ _) _ = r
-    visitNeighbor (UpdatedField field) neighbor
-      = proceedUpdated field neighbor
-    visitNeighbor (NoChange field) neighbor
-      = proceedUpdated field neighbor
-    proceedUpdated field neighbor
-      = case openAroundCellIfMatchNumber field neighbor of
-          NoChange field -> UpdatedField field
-          UpdatedField field -> UpdatedField  field
-          r@(InvalidField _ _) -> r
--- pPrint $ openAroundCellIfMatchNumber (updateCell testField2 (Cell Flag (Position 0 0))) (cellAt testField2 (Position 0 1))
-
-openAroundOneCellIfAllFlagOptionsMatchNumber field cell@(Cell (Number n) pos)
-  = map Field.pos
-  . filter isOpenUnknown
-  . join
-  . map (map head)
-  . filter ((==1) . length)
-  . map group
-  . transpose
-  . map (\(UpdatedField field) -> toList field)
-  . filter isUpdatedField
-  . map (\field -> openAroundCellIfMatchNumber field cell)
-  . map (Field.updateCells field)
-  $ flagableNeighborCombinations field pos
-
-openRemainingFields :: Game -> [Position]
-openRemainingFields game
-  | game^.flagsLeft == 0 = map pos . filter isField . toList $ game^.field
-  | otherwise = []
+openRemainingFields :: GM ()
+openRemainingFields = get >>= \case
+  game | view flagsLeft game == 0 -> updateCells opened
+       | otherwise -> return ()
+    where opened = map (\cell -> cell { cellType = OpenUnknown } )
+                   . filter isField
+                   . toList
+                   . view field
+                   $ game
 
 -- | Builds a new `Game` for each flag combination with cell's neighbors
 -- opened and marked.
@@ -195,20 +157,8 @@ flagableNeighborCombinationsGames cell = do
     game <- get
     return . flip execGame game $ do
       updateCells flags
-      modify . over Game.field $ \field ->
-        case openAroundOneCellIfMatchNumber field cell of
-          Just field' -> field'
-          Nothing -> field
-            -- -> error
-            --    (printf
-            --     ( "flagableNeighborCombinations: "
-            --       ++ "no cells open on cell: %s, "
-            --       ++ "flags: %s, neighbors: %s"
-            --     )
-            --     (show cell)
-            --     (show flags)
-            --     (show $ neighbors field (Field.pos cell)))
--- let f = testField3 in flip evalGame (initialGame Easy f) (flagableNeighborCombinationsGames . cellAt f $ Position 1 1)
+      openAroundOneCellIfMatchNumber cell
+      get
 
 solveCell :: Int -> [Cell] -> Cell -> GM Result
 solveCell 0 visited _ = do
@@ -221,9 +171,7 @@ solveCell depth visited cell@(Cell (Number _) pos)
       if (not $ validatePos field cell)
         then return $ InvalidField field pos
         else do
-          cellsOpened <- case openAroundOneCellIfMatchNumber field cell of
-              Just field' -> modify (set Game.field field') >> return True
-              Nothing -> return False
+          cellsOpened <- openAroundOneCellIfMatchNumber cell
           flagableNeighborCombinationsGames cell >>= \case
             [] -> do
               field' <- use Game.field
@@ -253,18 +201,15 @@ solveCell depth visited cell@(Cell (Number _) pos)
               if null allNeighborGames
                 then (\field -> InvalidField field pos) <$> use Game.field
                 else do
-                  let (merged, mergedNeighborsField)
-                        = mergeNeighbors pos field
-                          $ map
+                  merged <- mergeNeighbors pos
+                            $ map
                             (\case
                                 UpdatedField field -> field
                                 NoChange field -> field
                             )
                             $ allNeighborGames
                   if merged
-                    then do
-                      modify (set Game.field mergedNeighborsField)
-                      UpdatedField <$> use Game.field
+                    then UpdatedField <$> use Game.field
                     else if cellsOpened
                          then UpdatedField <$> use Game.field
                          else NoChange <$> use Game.field
@@ -273,9 +218,10 @@ solveCell _ _ _ = do
   return $ NoChange field
 -- let f = testField3 in flip evalGame (initialGame Easy f) (solveCell 5 [] . cellAt f $ Position 1 1)
 
-mergeNeighbors :: Position -> CellField -> [CellField] -> (Bool, CellField)
-mergeNeighbors pos baseField fields
-  = (not . null $ sameOpenOrFlag, Field.updateCells baseField sameOpenOrFlag)
+mergeNeighbors :: Position -> [CellField] -> GM Bool
+mergeNeighbors pos fields = do
+  updateCells sameOpenOrFlag
+  return . not . null $ sameOpenOrFlag
   where
     sameOpenOrFlag = filter (\cell -> isOpen cell || isFlag cell)
                    . join
@@ -310,6 +256,7 @@ solve = do
           else loop visited cells
   cells <- cellsAffectedByUpdate <$> get
   loop [] cells
+  openRemainingFields
   openCells <- gets (filter isOpenUnknown . toList . view Game.field)
   let open = map Field.pos $ openCells
   markCells <- gets (filter isNewFlag . toList . view Game.field)
