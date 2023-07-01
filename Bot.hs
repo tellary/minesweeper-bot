@@ -195,6 +195,16 @@ solveCell depth visited cell@(Cell (Number _) pos)
                         let neighborNumbers
                               = filter isNumber
                               $ neighbors (view Game.field game) pos
+                            -- Validate immediate neighbors to avoid considering
+                            -- neighbors of an immediate neighbor when some
+                            -- other immediate neighbor is invalid.
+                            allValid
+                              = all
+                                ( validatePos
+                                  (view Game.flagsLeft game)
+                                  (view Game.field game)
+                                )
+                                neighborNumbers
                             neighborGames
                               = map
                                 ( \neighbor ->
@@ -205,10 +215,13 @@ solveCell depth visited cell@(Cell (Number _) pos)
                                     game
                                 )
                                 neighborNumbers
-                        in if null $ find isInvalidField neighborGames
-                           then neighborGames
-                           else [] -- This game doesn't contribute,
-                                   -- because it's invalid for one of neighbors
+                        in if allValid
+                              then if null $ find isInvalidField neighborGames
+                                   then neighborGames
+                                   else []
+                                        -- This game doesn't contribute,
+                                        -- because it's invalid for one of neighbors
+                           else trace "Invalid neighbor" []
               if null allNeighborGames
                 then (\field -> InvalidField field pos) <$> use Game.field
                 else do
