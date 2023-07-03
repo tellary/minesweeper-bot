@@ -33,9 +33,14 @@ import Text.Printf                (printf)
 
 -- ./chromedriver --port=9515 --log-level=ALL --url-base=/wd/hub
 -- ./chromedriver --port=9515 --url-base=/wd/hub
-remoteConfig = useBrowser chrome defaultConfig { wdHost = "localhost"
-                                               , wdPort = 9515
-                                               }
+remoteConfig
+  = useBrowser
+    chrome
+    { chromeBinary = Just "./chromium" }
+    defaultConfig
+    { wdHost = "localhost"
+    , wdPort = 9515
+    }
 
 timeItNamed :: MonadIO m => String -> m a -> m a
 timeItNamed name a = do
