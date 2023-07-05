@@ -28,11 +28,32 @@ stdenv.mkDerivation rec {
   buildPhase = ''
     ghc GoogleMinesweeper.hs
   '';
-  installPhase = ''
-    mkdir -p $out
-    cp GoogleMinesweeper $out/GoogleMinesweeper
-    cp ${minesweeper-bot} $out/minesweeper-bot
-    cp -pR ${macosx-chromium.chromium}/* $out/
-    ln -s ${macosx-chromium.chromedriver}/chromedriver $out/chromedriver
-  '';
+  chromium-no-sandbox =
+    writeScript "chromium-no-sandbox"
+      ( builtins.replaceStrings ["__CHROMIUM__"] ["${chromium.outPath}"]
+        ( builtins.readFile ./chromium-no-sandbox)
+      );
+  installPhase
+    = if stdenv.isDarwin
+      then
+        ''
+        mkdir -p $out
+        cp GoogleMinesweeper $out/GoogleMinesweeper
+        cp ${minesweeper-bot} $out/minesweeper-bot
+        cp -pR ${macosx-chromium.chromium}/* $out/
+        ln -s ${macosx-chromium.chromedriver}/chromedriver $out/chromedriver
+        ''
+      else if stdenv.isLinux
+        then
+          ''
+          mkdir -p $out
+          cp GoogleMinesweeper $out/GoogleMinesweeper
+          cp ${minesweeper-bot} $out/minesweeper-bot
+          ln -s ${chromium}/bin/chromium $out/chromium
+          ln -s ${chromedriver}/bin/chromedriver $out/chromedriver
+          ''
+        else assert false; "error";
+  meta = {
+    platforms = ["x86_64-darwin"] ++ lib.platforms.linux;
+  };
 }
