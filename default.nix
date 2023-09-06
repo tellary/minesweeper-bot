@@ -28,11 +28,11 @@ stdenv.mkDerivation rec {
   buildPhase = ''
     ghc GoogleMinesweeper.hs
   '';
-  chromium-no-sandbox =
-    writeScript "chromium-no-sandbox"
-      ( builtins.replaceStrings ["__CHROMIUM__"] ["${chromium.outPath}"]
-        ( builtins.readFile ./chromium-no-sandbox)
-      );
+  # chromium-no-sandbox =
+  #   writeScript "chromium-no-sandbox"
+  #     ( builtins.replaceStrings ["__CHROMIUM__"] ["${chromium.outPath}"]
+  #       ( builtins.readFile ./chromium-no-sandbox)
+  #     );
   installPhase
     = if stdenv.isDarwin
       then

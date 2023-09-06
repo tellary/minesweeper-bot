@@ -1,4 +1,5 @@
 pushd $(dirname $0)
+killall -9 chromedriver
 ./chromedriver --port=9515 --url-base=/wd/hub &
 ./GoogleMinesweeper
 popd

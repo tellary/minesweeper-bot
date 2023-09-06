@@ -31,12 +31,13 @@ import Test.WebDriver.Common.Keys (enter)
 import Test.WebDriver.Session
 import Text.Printf                (printf)
 
--- ./chromedriver --port=9515 --log-level=ALL --url-base=/wd/hub
--- ./chromedriver --port=9515 --url-base=/wd/hub
+-- nix build
+-- ./result/minesweeper-bot
+-- ./result/chromedriver --port=9515 --log-level=ALL --url-base=/wd/hub
+-- ./result/chromedriver --port=9515 --url-base=/wd/hub
 remoteConfig
   = useBrowser
     chrome
-    { chromeBinary = Just "./chromium" }
     defaultConfig
     { wdHost = "localhost"
     , wdPort = 9515
@@ -57,12 +58,12 @@ returnSession config wd = runSession config $ do
   a <- wd
   return (sess, a)
 
-openGame :: GameSize -> WD (DynamicImage, Int)
+openGame :: GameSize -> WD ()
 openGame size = do
   openPage "https://www.google.com"
   openGameFromSearch size
 
-openGameFromSearch :: GameSize -> WD (DynamicImage, Int)
+openGameFromSearch :: GameSize -> WD ()
 openGameFromSearch size = do
   searchTextarea <- findElem (ByTag "textarea")
   sendKeys "minesweeper" searchTextarea
@@ -74,8 +75,7 @@ openGameFromSearch size = do
 
   canvas <- findElem (ByTag "canvas")
   click canvas
-  takeFieldScreenshot
-  
+
 selectSize Medium = return ()
 selectSize size = do
   click =<< findElem (ByTag "g-dropdown-menu")
@@ -339,7 +339,8 @@ openScreen size = do
 
 openScreenFromSearch :: GameSize -> WD Screen
 openScreenFromSearch size = do
-  (dynImg, flags) <- openGameFromSearch size
+  openGameFromSearch size
+  (dynImg, flags) <- takeFieldScreenshot
   let img8 = convertRGB8 dynImg
   let fs = readImgFieldSize img8
   let buildScreen
@@ -352,7 +353,8 @@ openScreenFromSearch size = do
   buildScreenLoop
 
 openScreenWithMsgs size = do
-  (dynImg, flags) <- openGame size
+  openGame size
+  (dynImg, flags) <- takeFieldScreenshot
   let img = convertRGB8 dynImg
   let fs = readImgFieldSize img
   return $ readFieldWithMsgs img fs
@@ -411,6 +413,16 @@ openCells fs ps
   = timeItNamed (printf "openCells (%d)" (length ps))
   . performOnCells openCell fs $ ps
 
+{-|
+  Re-opens Google Minesweeper game.
+
+  The first run on a Chromium from Nix opens the game with wrong font.
+  The font gets reset on page re-load and game re-open.
+-}
+playResetFont size = do
+  openGame size
+  play size
+
 play size = do
   field <- openScreen size
   continuePlay field
@@ -460,4 +472,4 @@ exitPlay screen count = do
 -- field <- runWD (fst r) $ openScreenFromSearch Hard
 -- runWD (fst r) $ continuePlay field
 
-main = returnSession remoteConfig (play Hard)
+main = returnSession remoteConfig (playResetFont Hard)
