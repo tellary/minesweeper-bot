@@ -37,7 +37,7 @@ import Text.Printf                (printf)
 -- ./result/chromedriver --port=9515 --url-base=/wd/hub
 remoteConfig
   = useBrowser
-    chrome
+    chrome { chromeBinary = Just "./chromium" }
     defaultConfig
     { wdHost = "localhost"
     , wdPort = 9515
